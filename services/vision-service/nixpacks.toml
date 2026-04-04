@@ -1,10 +1,10 @@
-# Force nixpacks to use Python only — prevents it from detecting the
-# monorepo's pnpm-workspace.yaml and trying to build the TypeScript SDK.
+# Install uv as a nix package (not via pip — pip isn't available in the nix env).
+# nixPkgs provides both python311 and uv from the nix package registry.
 [phases.setup]
-nixPkgs = ["python311"]
+nixPkgs = ["python311", "uv"]
 
 [phases.install]
-cmds = ["pip install uv", "uv sync"]
+cmds = ["uv sync"]
 
 [start]
 cmd = "uv run uvicorn vision_service.main:app --host 0.0.0.0 --port $PORT"
