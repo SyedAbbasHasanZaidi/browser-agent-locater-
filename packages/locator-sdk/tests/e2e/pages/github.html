@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--
+  Simulates: GitHub repository page
+  Challenge: SPA-style rendering — CSS classes are hashed (e.g. .btn-a3f2c)
+             and change between deploys. Rigid cssSelector strategies break.
+
+  DOM Strategy test:
+    - data-testid attributes ARE stable (GitHub uses them in their test suite)
+    - Should find the "Star" button via testId="star-button"
+
+  A11y Strategy test:
+    - The "Fork" button has aria-label="Fork this repository"
+    - Should match with high Jaro-Winkler score for description "fork button"
+
+  Vision Strategy test:
+    - The "Watch" button has no testId and a vague aria-label
+    - Should fall through DOM + A11y and require vision to locate
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>octocat/Hello-World — GitHub</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0d1117; color: #e6edf3; }
+
+    .header { background: #161b22; border-bottom: 1px solid #30363d;
+              padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+    .header-logo { font-weight: 700; font-size: 18px; color: #e6edf3; }
+    .search-input { background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
+                    padding: 6px 12px; border-radius: 6px; width: 280px; }
+
+    .repo-header { padding: 24px; border-bottom: 1px solid #21262d; }
+    .repo-name { font-size: 20px; margin-bottom: 16px; }
+    .repo-name a { color: #58a6ff; text-decoration: none; }
+
+    /* Hashed class names — simulate webpack CSS modules output */
+    .actions-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+    .btn-xQk2p { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+                  padding: 5px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn-xQk2p:hover { background: #30363d; }
+    .btn-primary-r7Tm9 { background: #238636; border: 1px solid #2ea043; color: #ffffff;
+                          padding: 5px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+
+    .tabs { display: flex; border-bottom: 1px solid #21262d; padding: 0 24px; }
+    .tab-item { padding: 10px 16px; font-size: 14px; cursor: pointer; color: #e6edf3;
+                border-bottom: 2px solid transparent; }
+    .tab-item.active { border-bottom-color: #f78166; font-weight: 600; }
+
+    .file-tree { padding: 24px; }
+    .file-row { display: flex; align-items: center; gap: 8px; padding: 6px;
+                border-bottom: 1px solid #21262d; font-size: 14px; }
+    .file-icon { width: 16px; height: 16px; }
+    .file-link { color: #58a6ff; text-decoration: none; cursor: pointer; }
+
+    .notification-badge { background: #1f6feb; color: white; border-radius: 20px;
+                           padding: 1px 7px; font-size: 12px; margin-left: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="header">
+    <span class="header-logo">GitHub</span>
+    <!-- data-testid="search-input" — DOM strategy will find this by testId -->
+    <input
+      class="search-input"
+      type="search"
+      placeholder="Search or jump to..."
+      data-testid="search-input"
+      aria-label="Search GitHub"
+    />
+  </header>
+
+  <!-- REPO HEADER -->
+  <div class="repo-header">
+    <div class="repo-name">
+      <a href="#">octocat</a> / <a href="#">Hello-World</a>
+    </div>
+
+    <div class="actions-bar">
+      <!--
+        Watch button: NO stable testId, vague aria-label.
+        DOM strategy: fails (no testId, hashed class)
+        A11y strategy: will match "Watch repository" weakly — might miss
+        Vision strategy: intended winner for description "watch notifications button"
+      -->
+      <button class="btn-xQk2p" aria-label="Watch repository notifications">
+        Watch
+        <span class="notification-badge">42</span>
+      </button>
+
+      <!--
+        Fork button: aria-label is stable and descriptive
+        A11y strategy intended winner for description "fork this repository"
+      -->
+      <button
+        class="btn-xQk2p"
+        aria-label="Fork this repository"
+        aria-role="button"
+      >
+        Fork
+        <span class="notification-badge">8.3k</span>
+      </button>
+
+      <!--
+        Star button: has data-testid
+        DOM strategy intended winner via testId="star-button"
+      -->
+      <button
+        class="btn-primary-r7Tm9"
+        data-testid="star-button"
+        aria-label="Star this repository"
+      >
+        ⭐ Star
+        <span class="notification-badge">87.4k</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <nav class="tabs" role="navigation" aria-label="Repository navigation">
+    <div class="tab-item active" role="tab" aria-selected="true">Code</div>
+    <div class="tab-item" role="tab" data-testid="issues-tab">
+      Issues <span class="notification-badge">150</span>
+    </div>
+    <div class="tab-item" role="tab" data-testid="pull-requests-tab">
+      Pull requests <span class="notification-badge">23</span>
+    </div>
+    <div class="tab-item" role="tab">Actions</div>
+    <div class="tab-item" role="tab">Settings</div>
+  </nav>
+
+  <!-- FILE TREE -->
+  <div class="file-tree" role="grid" aria-label="File and directory list">
+    <div class="file-row" role="row">
+      <span class="file-icon">📁</span>
+      <a class="file-link" role="gridcell" href="#">.github</a>
+    </div>
+    <div class="file-row" role="row">
+      <span class="file-icon">📄</span>
+      <a class="file-link" role="gridcell" href="#" data-testid="readme-file">README.md</a>
+    </div>
+    <div class="file-row" role="row">
+      <span class="file-icon">📄</span>
+      <a class="file-link" role="gridcell" href="#">LICENSE</a>
+    </div>
+  </div>
+
+</body>
+</html>

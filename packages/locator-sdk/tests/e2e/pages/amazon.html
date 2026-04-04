@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<!--
+  Simulates: Amazon product page
+  Challenge: Dense, deeply nested DOM. Amazon A/B tests their button text
+             constantly ("Add to Cart" vs "Add to Basket" vs "Buy Now" —
+             different cohorts see different labels). CSS selectors that
+             target the exact text break for users in different cohorts.
+
+  DOM Strategy test:
+    - The search box has id="twotabsearchtextbox" (stable ID)
+    - Should find it via cssSelector="#twotabsearchtextbox"
+
+  A11y Strategy test:
+    - Two variants of the "Add to Cart" button exist (A/B test simulation)
+    - Variant A: aria-label="Add to Cart"
+    - Variant B: aria-label="Add to Basket"  ← user is in this cohort
+    - description "add to cart button" should still fuzzy-match "Add to Basket"
+      with Jaro-Winkler ~0.82 (above threshold)
+
+  Vision Strategy test:
+    - The quantity selector dropdown has no accessible name
+    - Vision is the only strategy that can find it
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Amazon.com: Product Details</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #fff; color: #0f1111; }
+
+    .nav-bar { background: #131921; color: #fff; padding: 10px 18px;
+               display: flex; align-items: center; gap: 16px; }
+    .nav-logo { font-size: 22px; font-weight: 700; color: #ff9900; }
+    .nav-search { display: flex; flex: 1; max-width: 700px; }
+    .nav-search-input { flex: 1; padding: 8px 12px; border: none; font-size: 16px; }
+    .nav-search-btn { background: #febd69; border: none; padding: 8px 14px; cursor: pointer; }
+
+    .product-layout { display: flex; gap: 24px; padding: 24px; }
+    .product-images { width: 400px; }
+    .product-images img { width: 100%; border: 1px solid #ddd; border-radius: 4px; }
+
+    .product-info { flex: 1; }
+    .product-title { font-size: 20px; margin-bottom: 8px; }
+    .product-rating { color: #c45500; margin-bottom: 8px; }
+    .product-price { font-size: 24px; font-weight: 700; color: #B12704; margin-bottom: 16px; }
+    .price-label { font-size: 13px; color: #565959; }
+
+    .buy-box { border: 1px solid #ddd; border-radius: 4px; padding: 20px;
+               width: 300px; flex-shrink: 0; }
+    .buy-box-price { font-size: 22px; color: #B12704; font-weight: 700; margin-bottom: 4px; }
+    .delivery-info { font-size: 14px; color: #007600; margin-bottom: 12px; }
+
+    /* Dense nesting — simulates Amazon's actual component depth */
+    .quantity-wrapper { margin-bottom: 12px; }
+    .quantity-label { font-size: 14px; margin-bottom: 4px; }
+    .quantity-select-container > div > span > select {
+      padding: 6px 10px; border: 1px solid #888; border-radius: 4px;
+      background: #f0f2f2; font-size: 14px; width: 80px;
+    }
+
+    .atc-btn {
+      width: 100%; padding: 10px; background: #ffd814; border: 1px solid #fcd200;
+      border-radius: 20px; cursor: pointer; font-size: 16px; margin-bottom: 8px;
+    }
+    .atc-btn:hover { background: #f7ca00; }
+    .buy-now-btn {
+      width: 100%; padding: 10px; background: #ffa41c; border: 1px solid #ff8f00;
+      border-radius: 20px; cursor: pointer; font-size: 16px;
+    }
+
+    .feature-bullets { margin-top: 16px; }
+    .feature-bullets li { margin: 4px 0 4px 20px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="nav-bar">
+    <span class="nav-logo">amazon</span>
+    <div class="nav-search">
+      <!--
+        Stable ID — DOM strategy winner via cssSelector="#twotabsearchtextbox"
+      -->
+      <input
+        id="twotabsearchtextbox"
+        class="nav-search-input"
+        type="text"
+        placeholder="Search Amazon"
+        aria-label="Search"
+        data-testid="nav-search-input"
+      />
+      <button class="nav-search-btn" aria-label="Search">🔍</button>
+    </div>
+  </nav>
+
+  <!-- PRODUCT LAYOUT -->
+  <div class="product-layout">
+
+    <!-- Left: Images -->
+    <div class="product-images">
+      <div style="width:100%;height:380px;background:#f0f2f2;display:flex;
+                  align-items:center;justify-content:center;font-size:48px;
+                  border:1px solid #ddd;border-radius:4px;">📦</div>
+    </div>
+
+    <!-- Middle: Product info -->
+    <div class="product-info">
+      <h1 class="product-title">
+        Mechanical Keyboard — TKL Layout, Cherry MX Red Switches, RGB Backlight
+      </h1>
+      <div class="product-rating">⭐⭐⭐⭐ 4.4 out of 5 (2,847 ratings)</div>
+
+      <div class="price-label">Price:</div>
+      <div class="product-price">$89.99</div>
+
+      <ul class="feature-bullets">
+        <li>Compact TKL layout — saves desk space</li>
+        <li>Cherry MX Red switches — linear, 45g actuation</li>
+        <li>Per-key RGB backlight with 16.8M colors</li>
+        <li>USB-C detachable cable, N-Key rollover</li>
+      </ul>
+    </div>
+
+    <!-- Right: Buy box -->
+    <div class="buy-box">
+      <div class="buy-box-price">$89.99</div>
+      <div class="delivery-info">✓ FREE delivery Tuesday, April 8</div>
+      <div class="delivery-info">✓ In Stock</div>
+
+      <!-- Quantity: deeply nested, no aria-label — Vision strategy target -->
+      <div class="quantity-wrapper">
+        <div class="quantity-label">Quantity:</div>
+        <!--
+          Three levels of wrapper divs — simulates Amazon's actual DOM depth.
+          No aria-label on the select. DOM strategy: no testId/aria-label.
+          A11y strategy: no accessible name → Jaro-Winkler has nothing to score.
+          Vision strategy: INTENDED winner for description "quantity dropdown"
+        -->
+        <div class="quantity-select-container">
+          <div>
+            <span>
+              <select>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+              </select>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        A/B test simulation:
+        This user's cohort sees "Add to Basket" instead of "Add to Cart".
+        description "add to cart button" should STILL fuzzy-match via A11y
+        because Jaro-Winkler("add to cart button", "Add to Basket") ≈ 0.82
+      -->
+      <button
+        class="atc-btn"
+        id="add-to-cart-button"
+        aria-label="Add to Basket"
+        data-feature-id="add-to-cart"
+      >
+        Add to Basket
+      </button>
+
+      <button
+        class="buy-now-btn"
+        aria-label="Buy Now — proceed to checkout"
+        data-testid="buy-now-button"
+      >
+        Buy Now
+      </button>
+    </div>
+  </div>
+
+</body>
+</html>

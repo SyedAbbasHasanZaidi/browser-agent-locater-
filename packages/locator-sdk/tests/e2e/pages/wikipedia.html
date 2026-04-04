@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<!--
+  Simulates: Wikipedia article page
+  Challenge: Actually the EASIEST test — Wikipedia's HTML is clean, static,
+             semantic, and has been stable for decades. This is the baseline
+             test that validates the DOM strategy ALWAYS wins here.
+
+  Validation purpose:
+    - If the DOM strategy fails on Wikipedia, something fundamental is broken
+    - Performance test: locate() should complete in <100ms (no A11y/Vision needed)
+    - Confirms the fallback chain stops at priority 1
+
+  DOM Strategy tests:
+    - Search input: id="searchInput" (been stable since 2004)
+    - Edit button: data-testid="edit-page-button"
+    - Language link: href contains the lang code, accessible via cssSelector
+
+  These MUST NOT fall through to A11y or Vision — trajectory log should show
+  only one attempt (dom: succeeded).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Playwright — Wikipedia</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Linux Libertine, Georgia, Times, serif;
+           background: #fff; color: #202122; }
+
+    .site-header { background: #fff; border-bottom: 1px solid #a7d7f9;
+                   padding: 12px 20px; display: flex; align-items: center;
+                   justify-content: space-between; }
+    .site-logo { font-size: 20px; font-weight: 700; }
+    .search-form { display: flex; gap: 8px; }
+    .search-input { border: 1px solid #a2a9b1; padding: 6px 10px;
+                    font-size: 14px; width: 260px; border-radius: 2px; }
+    .search-btn { background: #f8f9fa; border: 1px solid #a2a9b1;
+                  padding: 6px 12px; cursor: pointer; border-radius: 2px; }
+
+    .page-body { display: flex; max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .sidebar { width: 200px; flex-shrink: 0; margin-right: 24px; }
+    .sidebar a { display: block; padding: 4px 0; color: #0645ad; font-size: 14px; }
+    .content { flex: 1; }
+
+    .page-title { font-family: Linux Libertine, Georgia, serif;
+                  font-size: 28px; border-bottom: 1px solid #a2a9b1;
+                  padding-bottom: 4px; margin-bottom: 12px; }
+    .page-actions { display: flex; gap: 12px; margin-bottom: 16px; }
+    .page-action-link { font-size: 13px; color: #0645ad; cursor: pointer; }
+    .edit-btn { color: #0645ad; font-size: 13px; cursor: pointer; }
+
+    .article-body p { margin-bottom: 12px; font-size: 15px; line-height: 1.6; }
+    .article-body h2 { font-size: 20px; border-bottom: 1px solid #a2a9b1;
+                        margin: 20px 0 8px; padding-bottom: 4px; }
+
+    .infobox { float: right; margin: 0 0 20px 24px; border: 1px solid #a2a9b1;
+               background: #f8f9fa; padding: 12px; width: 280px; font-size: 13px; }
+    .infobox-title { font-weight: 700; text-align: center; margin-bottom: 8px; }
+    .infobox-row { display: flex; justify-content: space-between;
+                   padding: 3px 0; border-top: 1px solid #eaecf0; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="site-logo">Wikipedia</div>
+    <form class="search-form" role="search" action="#" method="GET">
+      <!--
+        Stable ID — Wikipedia's search input has been id="searchInput" for years.
+        DOM strategy winner: cssSelector="#searchInput"
+      -->
+      <input
+        id="searchInput"
+        class="search-input"
+        type="search"
+        placeholder="Search Wikipedia"
+        aria-label="Search Wikipedia"
+        data-testid="search-input"
+        name="search"
+      />
+      <button class="search-btn" type="submit" aria-label="Search">Search</button>
+    </form>
+  </header>
+
+  <!-- PAGE BODY -->
+  <div class="page-body">
+
+    <!-- Sidebar navigation -->
+    <nav class="sidebar" aria-label="Site navigation">
+      <a href="#">Main page</a>
+      <a href="#">Contents</a>
+      <a href="#">Current events</a>
+      <a href="#">Random article</a>
+      <a href="#">Donate to Wikipedia</a>
+      <hr style="margin:8px 0;" />
+      <!-- Language links — testable via cssSelector="[hreflang='fr']" -->
+      <a href="#" hreflang="fr" lang="fr">Français</a>
+      <a href="#" hreflang="de" lang="de">Deutsch</a>
+      <a href="#" hreflang="es" lang="es">Español</a>
+    </nav>
+
+    <!-- Article content -->
+    <main class="content" role="main">
+      <h1 class="page-title" id="firstHeading">Playwright (software)</h1>
+
+      <div class="page-actions">
+        <!--
+          Edit button with data-testid — DOM strategy via testId="edit-page-button"
+        -->
+        <a
+          class="edit-btn"
+          data-testid="edit-page-button"
+          aria-label="Edit this page"
+          href="#"
+          role="button"
+        >
+          Edit
+        </a>
+        <a class="page-action-link" href="#" aria-label="View page history">
+          View history
+        </a>
+        <a class="page-action-link" href="#" data-testid="talk-page-link">
+          Talk
+        </a>
+      </div>
+
+      <div class="article-body">
+        <div class="infobox">
+          <div class="infobox-title">Playwright</div>
+          <div class="infobox-row"><span>Developer</span><span>Microsoft</span></div>
+          <div class="infobox-row"><span>Written in</span><span>TypeScript</span></div>
+          <div class="infobox-row"><span>License</span><span>Apache 2.0</span></div>
+          <div class="infobox-row"><span>Website</span><span>playwright.dev</span></div>
+        </div>
+
+        <p>
+          <b>Playwright</b> is an open-source automation framework for testing
+          web applications across Chromium, Firefox, and WebKit browsers.
+          Developed by Microsoft, it provides a high-level API for controlling
+          browser behavior programmatically.
+        </p>
+
+        <p>
+          Unlike Selenium, Playwright uses a WebSocket-based protocol to
+          communicate with browsers, enabling more reliable and faster test
+          execution. It natively supports modern web features including
+          shadow DOM, iframes, and service workers.
+        </p>
+
+        <h2>Features</h2>
+        <p>
+          Playwright supports auto-waiting, which means it automatically waits
+          for elements to become ready before interacting with them. It also
+          provides an accessibility tree API via
+          <code>page.accessibility.snapshot()</code> that exposes semantic
+          information about all elements on the page.
+        </p>
+      </div>
+    </main>
+  </div>
+
+</body>
+</html>

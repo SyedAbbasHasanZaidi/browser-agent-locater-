@@ -1,0 +1,31 @@
+{
+  "name": "locator-sdk",
+  "version": "0.1.0",
+  "description": "Multi-strategy browser element locator: DOM → A11y → Vision fallback chain",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "playwright": "^1.44.0"
+  }
+}

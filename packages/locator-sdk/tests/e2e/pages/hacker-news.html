@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<!--
+  Simulates: Hacker News
+  Challenge: Minimal semantic markup. HN was designed in 2007-era HTML.
+             No aria attributes, no data-testid, no labels.
+             Link text is functional ("submit", "hide", "past") but terse.
+             Table-based layout.
+
+  Strategy behaviour:
+    - DOM strategy: can match exact text like "submit" but that's ambiguous
+                    (multiple "hide" links on the page)
+    - A11y strategy: nodes have names derived from their text content, but
+                     terse one-word labels score poorly on Jaro-Winkler
+                     against a natural-language description like
+                     "the link to submit a new story"
+    - Vision strategy: INTENDED winner — Claude can visually identify
+                       the "submit" link in the nav bar vs the "hide" links
+                       on individual stories
+
+  This page exercises the scenario where even A11y gives up (returns null
+  because no node scores above 0.80) and Vision is the deciding strategy.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hacker News</title>
+  <style>
+    body { font-family: Verdana, Geneva, sans-serif; font-size: 10pt;
+           background: #f6f6ef; }
+    table { border-spacing: 0; }
+    td { padding: 0; }
+
+    .header-bar { background: #ff6600; padding: 2px 4px; }
+    .header-bar a { color: #000; text-decoration: none; font-weight: 700; padding: 0 4px; }
+    .header-bar a:hover { text-decoration: underline; }
+
+    .story-row td { padding: 2px 8px 0 0; vertical-align: top; }
+    .vote-arrow { color: #9a9a9a; cursor: pointer; font-size: 14px; }
+    .story-title a { color: #000; }
+    .story-title a:visited { color: #828282; }
+    .subtext { color: #828282; font-size: 8pt; }
+    .subtext a { color: #828282; }
+
+    .spacer { height: 5px; }
+    .more-link { padding: 10px 8px; font-size: 10pt; }
+    .more-link a { color: #000; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER TABLE — old-school table-based nav -->
+  <table style="width:100%;background:#ff6600;padding:0;">
+    <tr>
+      <td style="width:18px;padding-right:4px;">
+        <a href="#"><img src="" alt="Y" style="width:18px;height:18px;background:#fff;display:block;" /></a>
+      </td>
+      <td style="line-height:12pt;height:10px;">
+        <span class="header-bar">
+          <b><a href="#">Hacker News</a></b>
+          <!-- No aria-label on any nav link — just terse text -->
+          <a href="#">new</a>
+          <a href="#">past</a>
+          <a href="#">comments</a>
+          <a href="#">ask</a>
+          <a href="#">show</a>
+          <a href="#">jobs</a>
+          <!--
+            "submit" is the Vision strategy target.
+            description: "the link to submit a new story"
+            DOM: text="submit" matches, but so might other "submit" text on page
+            A11y: node name is just "submit" — too short for good Jaro-Winkler score
+            Vision: Claude can identify this as the nav "submit" link by context
+          -->
+          <a href="#" id="submit-link">submit</a>
+        </span>
+      </td>
+      <td style="text-align:right;padding-right:8px;">
+        <a href="#" style="color:#000;">login</a>
+      </td>
+    </tr>
+  </table>
+
+  <!-- STORIES TABLE -->
+  <table style="width:100%;margin-top:10px;">
+
+    <!-- Story 1 -->
+    <tr class="story-row">
+      <td align="right" valign="top" style="padding-right:4px;width:30px;">1.</td>
+      <td class="vote-arrow" valign="top">▲</td>
+      <td class="story-title">
+        <a href="#">Show HN: I built a multi-strategy browser element locator</a>
+        <span style="color:#828282;font-size:8pt;"> (github.com)</span>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2"></td>
+      <td class="subtext">
+        312 points by <a href="#">tester42</a> 3 hours ago
+        | <a href="#">hide</a>
+        | 87 <a href="#">comments</a>
+      </td>
+    </tr>
+    <tr class="spacer"><td colspan="3"></td></tr>
+
+    <!-- Story 2 -->
+    <tr class="story-row">
+      <td align="right" valign="top" style="padding-right:4px;width:30px;">2.</td>
+      <td class="vote-arrow" valign="top">▲</td>
+      <td class="story-title">
+        <a href="#">Why accessibility trees matter for automated testing</a>
+        <span style="color:#828282;font-size:8pt;"> (a11y.engineering)</span>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2"></td>
+      <td class="subtext">
+        198 points by <a href="#">a11yfan</a> 5 hours ago
+        | <a href="#">hide</a>
+        | 42 <a href="#">comments</a>
+      </td>
+    </tr>
+    <tr class="spacer"><td colspan="3"></td></tr>
+
+    <!-- Story 3 -->
+    <tr class="story-row">
+      <td align="right" valign="top" style="padding-right:4px;width:30px;">3.</td>
+      <td class="vote-arrow" valign="top">▲</td>
+      <td class="story-title">
+        <a href="#">Claude's vision capabilities for UI automation</a>
+        <span style="color:#828282;font-size:8pt;"> (anthropic.com)</span>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2"></td>
+      <td class="subtext">
+        451 points by <a href="#">ml_practitioner</a> 1 hour ago
+        | <a href="#">hide</a>
+        | 134 <a href="#">comments</a>
+      </td>
+    </tr>
+    <tr class="spacer"><td colspan="3"></td></tr>
+
+  </table>
+
+  <div class="more-link">
+    <a href="#">More</a>
+  </div>
+
+</body>
+</html>

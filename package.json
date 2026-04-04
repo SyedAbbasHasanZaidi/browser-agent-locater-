@@ -1,0 +1,19 @@
+{
+  "name": "agent-element-selector",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter locator-sdk test:e2e",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

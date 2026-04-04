@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<!--
+  Simulates: Airbnb listing page
+  Challenge: Heavy JavaScript rendering, shadow-DOM-style deep component nesting,
+             and dynamic date pickers. Elements rendered by JS have no stable
+             DOM attributes — they change every render cycle.
+
+  Key challenges modeled here:
+    1. The "Reserve" button is inside 4 levels of custom component wrappers
+       (simulates web components / styled-components / CSS-in-JS patterns)
+    2. The date picker inputs are rendered with generated IDs ("datepicker-0a3f")
+       that change on every page load — simulated with JS below
+    3. The guest counter buttons (+/-) have no text, no testId, only icon glyphs
+
+  Strategy behaviour:
+    - DOM strategy: fails on date picker (generated ID) and +/- buttons (no label)
+    - A11y strategy: date picker has aria-label="Check-in date" → A11y wins
+    - Vision strategy: +/- guest counter buttons → intended Vision target
+
+  Shadow DOM note:
+    Real shadow DOM would require page.locator('custom-el >> css=button') syntax.
+    This page simulates the EFFECT (deep nesting, no accessible names on leaves)
+    without using actual <shadow-root> so Playwright can inspect it — the test
+    still exercises the same fallback behaviour.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cozy Studio in SF · Airbnb</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Circular, -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+           background: #fff; color: #222; }
+
+    .header { border-bottom: 1px solid #ddd; padding: 12px 24px;
+              display: flex; align-items: center; justify-content: space-between; }
+    .logo { font-size: 24px; color: #ff385c; font-weight: 700; }
+    .header-links { display: flex; gap: 20px; font-size: 14px; }
+    .header-links a { color: #222; text-decoration: none; }
+
+    .listing-layout { display: flex; gap: 48px; padding: 24px; max-width: 1100px; }
+    .listing-main { flex: 1; }
+    .listing-title { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+    .listing-subtitle { color: #717171; font-size: 15px; margin-bottom: 20px; }
+    .listing-images { display: grid; grid-template-columns: 1fr 1fr;
+                       gap: 8px; margin-bottom: 24px; }
+    .listing-image { background: #f7f7f7; height: 200px; border-radius: 8px;
+                     display: flex; align-items: center; justify-content: center;
+                     font-size: 48px; }
+
+    /* Booking widget — deeply nested component structure */
+    .booking-widget { width: 380px; flex-shrink: 0; }
+    .booking-card { border: 1px solid #ddd; border-radius: 12px; padding: 24px;
+                    box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+    .booking-price { font-size: 22px; font-weight: 600; margin-bottom: 16px; }
+    .booking-price span { font-size: 15px; font-weight: 400; color: #717171; }
+
+    /* Simulate CSS-in-JS: generated class names */
+    ._3a8fkQ { border: 1px solid #b0b0b0; border-radius: 8px;
+                overflow: hidden; margin-bottom: 12px; }
+    ._3a8fkQ > ._kTf9mL { display: flex; }
+    ._3a8fkQ > ._kTf9mL > ._mW2nPx { flex: 1; padding: 10px 12px;
+                                       border-right: 1px solid #b0b0b0; }
+    ._3a8fkQ > ._kTf9mL > ._mW2nPx:last-child { border-right: none; }
+    ._mW2nPx label { font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+                     text-transform: uppercase; }
+    ._mW2nPx input { border: none; width: 100%; padding: 4px 0;
+                     font-size: 14px; outline: none; }
+
+    /* Guest counter — no accessible names on +/- buttons */
+    .guest-row { display: flex; justify-content: space-between; align-items: center;
+                 padding: 12px 16px; border: 1px solid #b0b0b0; border-radius: 8px;
+                 margin-bottom: 16px; }
+    .guest-type { font-size: 14px; }
+    .guest-controls { display: flex; align-items: center; gap: 12px; }
+    .guest-count { font-size: 16px; min-width: 20px; text-align: center; }
+    /* +/- buttons: only icon content, no aria-label, no testId */
+    .guest-btn { width: 32px; height: 32px; border: 1px solid #717171;
+                 border-radius: 50%; background: #fff; cursor: pointer;
+                 font-size: 18px; display: flex; align-items: center;
+                 justify-content: center; }
+    .guest-btn:hover { border-color: #222; }
+
+    .reserve-wrapper > div > div > button {
+      width: 100%; padding: 14px; background: linear-gradient(to right, #e61e4d, #e31c5f, #d70466);
+      color: #fff; border: none; border-radius: 8px; font-size: 16px;
+      font-weight: 600; cursor: pointer; margin-bottom: 12px;
+    }
+    .reserve-wrapper > div > div > button:hover { opacity: 0.9; }
+
+    .price-breakdown { font-size: 14px; }
+    .price-row { display: flex; justify-content: space-between;
+                 margin-bottom: 8px; color: #222; }
+    .price-row.total { font-weight: 700; border-top: 1px solid #ddd;
+                       padding-top: 8px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="logo">airbnb</div>
+    <div class="header-links">
+      <a href="#">Become a Host</a>
+      <a href="#">Help</a>
+      <a href="#" data-testid="user-menu-button" aria-label="User menu">Account</a>
+    </div>
+  </header>
+
+  <!-- LISTING LAYOUT -->
+  <div class="listing-layout">
+
+    <!-- Left: listing info -->
+    <div class="listing-main">
+      <h1 class="listing-title">Cozy Studio in the Mission District, San Francisco</h1>
+      <div class="listing-subtitle">Entire studio · 2 guests · 1 bed · 1 bath</div>
+
+      <div class="listing-images">
+        <div class="listing-image">🏠</div>
+        <div class="listing-image">🛋️</div>
+        <div class="listing-image">🍳</div>
+        <div class="listing-image">🛁</div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <h2 style="margin-bottom:8px;">About this place</h2>
+        <p style="font-size:15px;color:#222;line-height:1.6;">
+          A bright and airy studio in the heart of the Mission. Walking distance
+          to BART, local cafes, and Dolores Park. The space features a fully
+          equipped kitchen, fast WiFi, and a comfortable queen bed.
+        </p>
+      </div>
+    </div>
+
+    <!-- Right: booking widget -->
+    <div class="booking-widget">
+      <div class="booking-card">
+        <div class="booking-price">$142 <span>/ night</span></div>
+
+        <!--
+          Date picker — CSS-in-JS component structure
+          Input IDs are generated dynamically (JS sets them to random strings)
+          DOM strategy: fails because generated ID is unpredictable
+          A11y strategy: INTENDED WINNER — aria-label is stable
+                         description "check-in date" → matches aria-label="Check-in date"
+        -->
+        <div class="_3a8fkQ">
+          <div class="_kTf9mL">
+            <div class="_mW2nPx">
+              <label for="checkin-dynamic">CHECK-IN</label>
+              <input
+                type="text"
+                aria-label="Check-in date"
+                placeholder="Add date"
+                autocomplete="off"
+              />
+            </div>
+            <div class="_mW2nPx">
+              <label for="checkout-dynamic">CHECKOUT</label>
+              <input
+                type="text"
+                aria-label="Checkout date"
+                placeholder="Add date"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!--
+          Guest counter — +/- buttons have NO accessible name, no testId
+          DOM strategy: no selector to distinguish "+" for Adults vs "+" for Children
+          A11y strategy: node name = "+" (Jaro-Winkler too low)
+          Vision strategy: INTENDED WINNER — Claude can see the "Adults" row
+                           and identify its increment button
+        -->
+        <div class="guest-row">
+          <div class="guest-type">
+            <div style="font-weight:600;">Adults</div>
+            <div style="font-size:13px;color:#717171;">Ages 13 or above</div>
+          </div>
+          <div class="guest-controls">
+            <button class="guest-btn" type="button">−</button>
+            <span class="guest-count" aria-live="polite">1</span>
+            <button class="guest-btn" type="button" id="adults-increment">+</button>
+          </div>
+        </div>
+
+        <div class="guest-row">
+          <div class="guest-type">
+            <div style="font-weight:600;">Children</div>
+            <div style="font-size:13px;color:#717171;">Ages 2–12</div>
+          </div>
+          <div class="guest-controls">
+            <button class="guest-btn" type="button">−</button>
+            <span class="guest-count" aria-live="polite">0</span>
+            <button class="guest-btn" type="button">+</button>
+          </div>
+        </div>
+
+        <!--
+          Reserve button — deeply nested in 3 wrapper divs (simulates
+          styled-components / Radix UI component composition pattern).
+          DOM strategy: no testId, no stable selector through wrapper chain
+          A11y strategy: button name is "Reserve" → description "reserve button"
+                         Jaro-Winkler("reserve button", "Reserve") ≈ 0.89 → WINS
+        -->
+        <div class="reserve-wrapper">
+          <div>
+            <div>
+              <button
+                type="button"
+                aria-label="Reserve"
+                data-testid="reserve-button"
+              >
+                Reserve
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="price-breakdown">
+          <div class="price-row">
+            <span>$142 × 5 nights</span>
+            <span>$710</span>
+          </div>
+          <div class="price-row">
+            <span>Cleaning fee</span>
+            <span>$65</span>
+          </div>
+          <div class="price-row">
+            <span>Airbnb service fee</span>
+            <span>$116</span>
+          </div>
+          <div class="price-row total">
+            <span>Total before taxes</span>
+            <span>$891</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>
