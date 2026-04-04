@@ -20,11 +20,49 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
+# A11yNodeInfo  —  Accessibility tree node sent as disambiguation context
+# ---------------------------------------------------------------------------
+# Each node represents one interactive element collected by the TypeScript
+# A11y strategy. Provides Claude with a structural map of all interactive
+# elements on the page — roles, accessible names, and positions.
+# ---------------------------------------------------------------------------
+class A11yNodeInfo(BaseModel):
+    role: str = Field(..., description="ARIA role or HTML tag name")
+    name: str | None = Field(default=None, description="Accessible name (aria-label, innerText, etc.)")
+    description: str | None = Field(default=None, description="Accessible description")
+    bounding_box: dict[str, float] | None = Field(
+        default=None,
+        description="Element position {x, y, width, height} in pixels",
+    )
+
+
+# ---------------------------------------------------------------------------
+# FailedStrategyAttempt  —  What previous strategies tried and why they failed
+# ---------------------------------------------------------------------------
+class FailedStrategyAttempt(BaseModel):
+    strategy: Literal["dom", "a11y"] = Field(..., description="Strategy that failed")
+    error: str | None = Field(default=None, description="Error message if strategy threw")
+    candidates_considered: int | None = Field(
+        default=None, description="Number of candidates the strategy evaluated"
+    )
+    best_candidate_name: str | None = Field(
+        default=None, description="Accessible name of the closest match"
+    )
+    best_candidate_score: float | None = Field(
+        default=None, description="Jaro-Winkler score of the closest match"
+    )
+
+
+# ---------------------------------------------------------------------------
 # VisionLocateRequest  —  POST /locate
 # ---------------------------------------------------------------------------
 # Sent by the TypeScript VisionStrategy when DOM and A11y have both failed.
 # The strategy captures a full-page screenshot, base64-encodes it, and sends
 # it here together with the natural-language description of the target.
+#
+# Optional context fields (a11y_tree, failed_attempts, viewport, target_role_hint)
+# enrich Claude's prompt for better disambiguation of ambiguous elements.
+# All are optional for backward compatibility with older SDK versions.
 # ---------------------------------------------------------------------------
 class VisionLocateRequest(BaseModel):
     # Base64-encoded PNG of the full page at the time of the locate() call.
@@ -58,6 +96,38 @@ class VisionLocateRequest(BaseModel):
     # reserved for future multi-candidate ranking.
     max_candidates: int = Field(
         default=1, ge=1, le=10, description="Max number of candidate elements"
+    )
+
+    # --- Disambiguation context (all optional, backward compatible) ----------
+
+    # Flattened list of interactive elements from the A11y strategy's DOM scan.
+    # Gives Claude a structural map: "these are all the buttons, links, and
+    # inputs on the page with their accessible names and positions."
+    a11y_tree: list[A11yNodeInfo] | None = Field(
+        default=None,
+        description="Interactive elements collected by the A11y strategy",
+    )
+
+    # What DOM and A11y strategies already tried and why they failed.
+    # Helps Claude avoid redundant reasoning and focus on what's different
+    # about the visual approach.
+    failed_attempts: list[FailedStrategyAttempt] | None = Field(
+        default=None,
+        description="Strategies that tried and failed before Vision",
+    )
+
+    # Browser viewport dimensions — helps Claude scale bounding box coordinates
+    # relative to the screenshot dimensions.
+    viewport: dict[str, int] | None = Field(
+        default=None,
+        description="Viewport dimensions {width, height} in pixels",
+    )
+
+    # Expected ARIA role of the target element (e.g. "button", "link", "combobox").
+    # Narrows Claude's search space when the caller knows the element type.
+    target_role_hint: str | None = Field(
+        default=None,
+        description="Expected ARIA role of the target element",
     )
 
 

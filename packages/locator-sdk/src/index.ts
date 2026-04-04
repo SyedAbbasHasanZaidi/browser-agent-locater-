@@ -11,7 +11,7 @@
 
 // Primary class — the only thing most callers ever need
 export { ElementLocator } from "./locator.js";
-export type { ElementLocatorOptions } from "./locator.js";
+export type { ElementLocatorOptions, StrategyName } from "./locator.js";
 
 // Domain types — needed by callers to type their own variables
 export type {
@@ -20,6 +20,7 @@ export type {
   LocatorContext,
   BoundingBox,
   A11yNode,
+  FailedAttemptInfo,
   StrategyResult,
 } from "./types/strategy.types.js";
 

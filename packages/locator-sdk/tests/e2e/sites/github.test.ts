@@ -40,7 +40,9 @@ function makeLocator(logTrajectories = false) {
     page,
     sessionId: "test-github-session",
     timeout: 5000,
-    logTrajectories, // disable in tests — no Python service needed
+    logTrajectories,
+    visionServiceUrl: process.env["VISION_SERVICE_URL"],
+    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
   });
 }
 
@@ -131,6 +133,8 @@ describe.skipIf(!VISION_AVAILABLE)("GitHub page — Vision Strategy", () => {
       sessionId: "test-github-vision",
       timeout: 10000,
       logTrajectories: false,
+      visionServiceUrl: process.env["VISION_SERVICE_URL"],
+      anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
     });
 
     // description that will fail DOM (no testId) and likely fail A11y (vague label)

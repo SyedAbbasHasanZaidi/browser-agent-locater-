@@ -55,6 +55,7 @@ function makeMockPage(elementHandle: ElementHandle | null = makeMockElementHandl
     screenshot: vi.fn().mockResolvedValue(Buffer.from("fake-screenshot")),
     url: vi.fn().mockReturnValue("http://localhost/test"),
     evaluateHandle: vi.fn().mockResolvedValue(jsHandle),
+    viewportSize: vi.fn().mockReturnValue({ width: 1280, height: 720 }),
   } as unknown as Page;
 }
 
@@ -173,6 +174,7 @@ describe("VisionStrategy", () => {
       screenshot: vi.fn().mockResolvedValue(Buffer.from("s")),
       url: vi.fn().mockReturnValue("http://localhost"),
       evaluateHandle: vi.fn().mockResolvedValue(jsHandle),
+      viewportSize: vi.fn().mockReturnValue({ width: 1280, height: 720 }),
     } as unknown as Page;
 
     const result = await strategy.locate({ description: "floating button" }, makeContext(page));

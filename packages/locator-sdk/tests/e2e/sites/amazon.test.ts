@@ -37,6 +37,8 @@ function makeLocator() {
     sessionId: "test-amazon-session",
     timeout: 5000,
     logTrajectories: false,
+    visionServiceUrl: process.env["VISION_SERVICE_URL"],
+    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
   });
 }
 

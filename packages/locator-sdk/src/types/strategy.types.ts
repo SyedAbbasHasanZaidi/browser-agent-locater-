@@ -83,14 +83,20 @@ export interface LocatorContext {
   screenshotBase64?: string;
   a11yTree?: A11yNode[];
   timeout?: number;
+  /** Metadata from strategies that tried and failed — forwarded to Vision */
+  failedAttempts?: FailedAttemptInfo[];
 }
 
 // ---------------------------------------------------------------------------
 // A11yNode
 // ---------------------------------------------------------------------------
-// A node in the accessibility tree returned by page.accessibility.snapshot().
-// Playwright's built-in type is untyped (returns `null | object`), so we
-// declare our own shape for safe BFS traversal in the A11y strategy.
+// Represents an interactive element collected by the A11y strategy.
+// Originally from page.accessibility.snapshot() (removed in Playwright v1.43+),
+// now built from DOM queries (page.locator + el.evaluate).
+//
+// The optional boundingBox field is populated when the A11y strategy collects
+// element positions — this data is forwarded to the Vision strategy so Claude
+// can cross-reference its visual identification with known interactive elements.
 // ---------------------------------------------------------------------------
 export interface A11yNode {
   role: string;
@@ -99,6 +105,23 @@ export interface A11yNode {
   value?: string | number;
   checked?: boolean;
   children?: A11yNode[];
+  boundingBox?: BoundingBox;
+}
+
+// ---------------------------------------------------------------------------
+// FailedAttemptInfo
+// ---------------------------------------------------------------------------
+// Metadata about a strategy that tried and failed to find the target element.
+// Populated by the FallbackChain and individual strategies (e.g. A11y reports
+// its best near-miss). Forwarded to the Vision strategy so Claude can see
+// what was already tried and why it failed — avoiding redundant reasoning.
+// ---------------------------------------------------------------------------
+export interface FailedAttemptInfo {
+  strategy: "dom" | "a11y";
+  error?: string;
+  candidatesConsidered?: number;
+  bestCandidateName?: string;
+  bestCandidateScore?: number;
 }
 
 // ---------------------------------------------------------------------------

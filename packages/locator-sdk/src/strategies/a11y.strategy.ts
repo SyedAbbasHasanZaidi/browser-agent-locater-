@@ -11,18 +11,25 @@ import { BaseStrategy } from "./base.strategy.js";
 // A11yStrategy — Priority 2 (~150ms)
 // ---------------------------------------------------------------------------
 //
-// Uses Playwright's accessibility tree snapshot to find elements by semantic
-// meaning rather than DOM structure. Survives CSS class renames, DOM
-// restructuring, and partial text changes that break the DOM strategy.
+// Finds elements by semantic meaning rather than DOM structure. Survives CSS
+// class renames, DOM restructuring, and partial text changes that break the
+// DOM strategy.
 //
 // Algorithm:
-//   1. Call page.accessibility.snapshot() → full semantic tree
-//   2. BFS the tree, collecting all leaf/interactive nodes
-//   3. Score each node against target.description using Jaro-Winkler
+//   1. Collect all interactive elements from the page via DOM queries
+//      (buttons, links, inputs, selects, and anything with aria-label or role)
+//   2. For each element, extract its accessible name (aria-label, text content,
+//      placeholder, or title)
+//   3. Score each candidate against target.description using Jaro-Winkler
 //      fuzzy string similarity
-//   4. Pick the highest-scoring node above the 0.80 threshold
-//   5. Map the winning a11y node back to a live DOM element via
-//      page.locator(`role=${role} >> name="${name}"`)
+//   4. Pick the highest-scoring candidate above the 0.80 threshold
+//   5. Return its ElementHandle
+//
+// Why not page.accessibility.snapshot()?
+//   The accessibility snapshot API (page.accessibility) was removed in
+//   Playwright v1.43. The replacement (page.ariaSnapshot) returns a YAML
+//   string designed for assertions, not tree traversal. We collect candidates
+//   directly from the DOM — which is more reliable and just as fast.
 //
 // Why Jaro-Winkler over Levenshtein?
 //   Jaro-Winkler gives extra weight to matching prefixes, which makes it
@@ -36,14 +43,31 @@ import { BaseStrategy } from "./base.strategy.js";
 //
 // Dependency Flow:
 //   FallbackChain → A11yStrategy.locate() → BaseStrategy.withTimeout()
-//                → _locate() → page.accessibility.snapshot()
-//                            → bfsNodes()
+//                → _locate() → page.$$() (DOM query for interactive elements)
 //                            → jaroWinkler()
-//                            → page.locator().elementHandle()
+//                            → ElementHandle
 // ---------------------------------------------------------------------------
 
 // Minimum Jaro-Winkler score to consider a node a valid match.
 const CONFIDENCE_THRESHOLD = 0.80;
+
+// CSS selector that targets all interactive / labelled elements.
+// Covers buttons, links, inputs, selects, textareas, and anything explicitly
+// labelled with aria-label or a non-presentation role.
+const CANDIDATE_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "select",
+  "textarea",
+  "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  "[role='tab']",
+  "[role='checkbox']",
+  "[role='radio']",
+  "[aria-label]",
+].join(", ");
 
 export class A11yStrategy extends BaseStrategy {
   readonly name = "a11y" as const;
@@ -61,67 +85,96 @@ export class A11yStrategy extends BaseStrategy {
       return null;
     }
 
-    // Capture the accessibility tree. Playwright returns null for pages with
-    // no accessible content (e.g. a blank page during load).
-    const snapshot = await page.accessibility.snapshot();
-    if (!snapshot) {
+    // Collect all interactive / labelled elements from the DOM.
+    // page.locator().all() returns a Locator[] — one per matching element.
+    const locator = page.locator(CANDIDATE_SELECTOR);
+    const count = await locator.count();
+    if (count === 0) {
       return null;
     }
 
+    // Build a synthetic A11y node list from the live DOM elements.
+    // For each element we extract its accessible name from (in priority order):
+    //   aria-label attribute → innerText → placeholder → title
+    // This mirrors how browsers compute accessible names for most elements.
+    const nodes: A11yNode[] = [];
+    // Maps nodes[j] → original DOM index i, so we can call locator.nth()
+    // with the correct index even when empty-name elements are skipped.
+    const domIndices: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const el = locator.nth(i);
+      const name = await el.evaluate((node: Element) => {
+        return (
+          node.getAttribute("aria-label") ||
+          (node as HTMLElement).innerText?.trim() ||
+          (node as HTMLInputElement).placeholder ||
+          node.getAttribute("title") ||
+          ""
+        );
+      });
+      if (name) {
+        // role is used for context.a11yTree hydration — approximate from tag/attr
+        const role = await el.evaluate((node: Element) => {
+          return (
+            node.getAttribute("role") ||
+            node.tagName.toLowerCase()
+          );
+        });
+        // Collect bounding box for each candidate — forwarded to Vision strategy
+        // so Claude can cross-reference visual position with known elements.
+        const bbox = await el.boundingBox();
+        nodes.push({
+          role,
+          name,
+          boundingBox: bbox ? { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height } : undefined,
+        } as A11yNode);
+        domIndices.push(i);
+      }
+    }
+
     // Hydrate the shared context so FallbackChain can log it later.
-    // Cast Playwright's untyped snapshot to our A11yNode interface.
-    context.a11yTree = [snapshot as unknown as A11yNode];
+    context.a11yTree = nodes;
 
-    // BFS to collect all nodes that have a name (accessible label).
-    // Unnamed nodes (pure layout divs, etc.) cannot be matched or located.
-    const nodes = bfsNodes(context.a11yTree);
-
-    // Score every named node against the query string.
-    let bestNode: A11yNode | null = null;
+    // Score every candidate against the query string.
+    let bestIndex = -1;
     let bestScore = 0;
 
-    for (const node of nodes) {
-      const label = node.name ?? node.description ?? "";
+    for (let i = 0; i < nodes.length; i++) {
+      const label = nodes[i].name ?? "";
       if (!label) continue;
 
       const score = jaroWinkler(query.toLowerCase(), label.toLowerCase());
-
       if (score > bestScore) {
         bestScore = score;
-        bestNode = node;
+        bestIndex = i;
       }
     }
 
     // Reject matches below the confidence threshold.
-    if (bestScore < CONFIDENCE_THRESHOLD || bestNode === null) {
+    // Report the near-miss so Vision strategy knows what A11y tried.
+    if (bestScore < CONFIDENCE_THRESHOLD || bestIndex === -1) {
+      context.failedAttempts ??= [];
+      context.failedAttempts.push({
+        strategy: "a11y",
+        candidatesConsidered: nodes.length,
+        bestCandidateName: bestIndex >= 0 ? (nodes[bestIndex].name ?? undefined) : undefined,
+        bestCandidateScore: bestScore > 0 ? bestScore : undefined,
+      });
       return null;
     }
 
-    // Map the winning a11y node back to a live Playwright Locator.
-    // Playwright's role + name filter is the most reliable way to go from
-    // an a11y tree node to a DOM element — it uses the browser's own
-    // accessibility API to find the element.
-    const role = bestNode.role;
-    const name = bestNode.name ?? "";
-
-    // Escape quotes in the name to prevent selector injection.
-    const safeName = name.replace(/"/g, '\\"');
-    const selector = `role=${role} >> name="${safeName}"`;
-    const locator = page.locator(selector);
-
-    const count = await locator.count();
-    if (count === 0) {
-      // The a11y node exists in the tree but Playwright can't locate it —
-      // this can happen with custom ARIA roles or shadowed components.
-      return null;
-    }
-
-    const handle = await (count === 1 ? locator : locator.first()).elementHandle();
+    const bestLocator = locator.nth(domIndices[bestIndex]);
+    const handle = await bestLocator.elementHandle();
     if (handle === null) {
       return null;
     }
 
     const boundingBox = (await handle.boundingBox()) ?? undefined;
+
+    // Build a human-readable selector for trajectory logging.
+    const bestNode = nodes[bestIndex];
+    const safeName = (bestNode.name ?? "").replace(/"/g, '\\"');
+    const selector = `a11y:${bestNode.role}[name="${safeName}"]`;
 
     const result: LocatedElement = {
       handle,
@@ -133,28 +186,6 @@ export class A11yStrategy extends BaseStrategy {
 
     return result;
   }
-}
-
-// ---------------------------------------------------------------------------
-// bfsNodes — BFS traversal of the A11y tree
-// ---------------------------------------------------------------------------
-// Returns all nodes in breadth-first order. BFS means we find the most
-// prominent/top-level matching element first (e.g. a nav button before a
-// nested span inside it), which is almost always the right element to click.
-// ---------------------------------------------------------------------------
-function bfsNodes(roots: A11yNode[]): A11yNode[] {
-  const result: A11yNode[] = [];
-  const queue: A11yNode[] = [...roots];
-
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    result.push(node);
-    if (node.children) {
-      queue.push(...node.children);
-    }
-  }
-
-  return result;
 }
 
 // ---------------------------------------------------------------------------

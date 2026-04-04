@@ -24,12 +24,34 @@ import type {
 //   preference for an SDK that will be consumed by other projects.
 // ---------------------------------------------------------------------------
 
+// A11y node info sent as disambiguation context for the Vision provider.
+export interface VisionA11yNodeInfo {
+  role: string;
+  name?: string;
+  description?: string;
+  bounding_box?: { x: number; y: number; width: number; height: number };
+}
+
+// What a previous strategy tried and why it failed.
+export interface VisionFailedAttempt {
+  strategy: "dom" | "a11y";
+  error?: string;
+  candidates_considered?: number;
+  best_candidate_name?: string;
+  best_candidate_score?: number;
+}
+
 export interface VisionLocateRequest {
   screenshot_base64: string;
   description: string;
   page_url: string;
   provider?: "claude" | "openai";
   max_candidates?: number;
+  // Disambiguation context (all optional, backward compatible)
+  a11y_tree?: VisionA11yNodeInfo[];
+  failed_attempts?: VisionFailedAttempt[];
+  viewport?: { width: number; height: number };
+  target_role_hint?: string;
 }
 
 export class VisionClient {

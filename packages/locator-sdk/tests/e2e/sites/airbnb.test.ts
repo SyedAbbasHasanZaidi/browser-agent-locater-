@@ -38,6 +38,8 @@ function makeLocator(overrides: Partial<{ sessionId: string; timeout: number }> 
     sessionId: overrides.sessionId ?? "test-airbnb-session",
     timeout: overrides.timeout ?? 5000,
     logTrajectories: false,
+    visionServiceUrl: process.env["VISION_SERVICE_URL"],
+    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
   });
 }
 

@@ -44,6 +44,9 @@ import { TrajectoryLogger } from "./trajectory/logger.js";
 //       OR throw ElementNotFoundError
 // ---------------------------------------------------------------------------
 
+/** Strategy names that can be selectively enabled */
+export type StrategyName = "dom" | "a11y" | "vision";
+
 export interface ElementLocatorOptions {
   /** The Playwright page to operate on */
   page: Page;
@@ -74,6 +77,16 @@ export interface ElementLocatorOptions {
    * Default: true
    */
   logTrajectories?: boolean;
+  /**
+   * Subset of strategies to enable, in priority order.
+   * Default: ["dom", "a11y", "vision"] (the full fallback chain).
+   *
+   * Use this to isolate a single strategy for testing or to skip expensive
+   * strategies (e.g. vision) in performance-sensitive paths.
+   *
+   * Example: strategies: ["a11y"] — only A11y runs; DOM and Vision are skipped.
+   */
+  strategies?: StrategyName[];
 }
 
 export class ElementLocator {
@@ -106,15 +119,25 @@ export class ElementLocator {
       visionServiceUrl = process.env["VISION_SERVICE_URL"] ?? "http://localhost:8765",
       anthropicApiKey,
       logTrajectories = true,
+      strategies: enabledStrategies,
     } = options;
 
     const visionClient = new VisionClient(visionServiceUrl, anthropicApiKey);
 
-    const chain = new FallbackChain([
-      new DomStrategy(),
-      new A11yStrategy(),
-      new VisionStrategy(visionClient),
-    ]);
+    // Build the full strategy set in priority order, then filter if the caller
+    // specified a subset. This preserves the canonical DOM → A11y → Vision
+    // ordering even when only a subset is enabled.
+    const allStrategies: Array<{ name: StrategyName; instance: BaseStrategy }> = [
+      { name: "dom", instance: new DomStrategy() },
+      { name: "a11y", instance: new A11yStrategy() },
+      { name: "vision", instance: new VisionStrategy(visionClient) },
+    ];
+
+    const filtered = enabledStrategies
+      ? allStrategies.filter((s) => enabledStrategies.includes(s.name))
+      : allStrategies;
+
+    const chain = new FallbackChain(filtered.map((s) => s.instance));
 
     const logger = logTrajectories
       ? new TrajectoryLogger(sessionId, visionServiceUrl)

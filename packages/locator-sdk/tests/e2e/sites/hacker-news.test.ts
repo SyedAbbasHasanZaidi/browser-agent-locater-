@@ -39,7 +39,8 @@ function makeLocator(visionServiceUrl?: string) {
     sessionId: "test-hn-session",
     timeout: 5000,
     logTrajectories: false,
-    ...(visionServiceUrl && { visionServiceUrl }),
+    visionServiceUrl: visionServiceUrl ?? process.env["VISION_SERVICE_URL"],
+    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
   });
 }
 
@@ -53,11 +54,13 @@ describe("Hacker News page — DOM Strategy (exact matches)", () => {
     expect(result.confidence).toBe(1.0);
   });
 
-  it("finds a story vote arrow by ariaRole=button would NOT work (no role)", async () => {
-    // Vote arrows are just ▲ text with no semantic role — no match possible
+  it("vote arrow cannot be found by ariaRole=button alone (no button role on the element)", async () => {
+    // Vote arrows are <a> links with ▲ text and no role="button" attribute.
+    // Without a text hint, ariaRole="button" only tries role=button which finds
+    // nothing — the arrow is not a button. ElementNotFoundError expected.
     const locator = makeLocator();
     await expect(
-      locator.locate({ ariaRole: "button", text: "▲" })
+      locator.locate({ ariaRole: "button" })
     ).rejects.toThrow(ElementNotFoundError);
   });
 });

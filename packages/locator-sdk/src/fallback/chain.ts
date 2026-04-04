@@ -96,6 +96,22 @@ export class FallbackChain {
 
       attempts.push(attempt);
 
+      // If the strategy failed, record metadata for downstream strategies
+      // (e.g. Vision can see what A11y tried). Skip if the strategy already
+      // pushed its own detailed entry (e.g. A11y reports near-miss info).
+      if (!succeeded) {
+        context.failedAttempts ??= [];
+        const alreadyReported = context.failedAttempts.some(
+          (fa) => fa.strategy === strategy.name
+        );
+        if (!alreadyReported) {
+          context.failedAttempts.push({
+            strategy: strategy.name as "dom" | "a11y",
+            error: errorMessage,
+          });
+        }
+      }
+
       // First success wins — stop the chain immediately.
       if (succeeded && result !== null) {
         const totalDurationMs = performance.now() - chainStart;

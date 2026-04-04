@@ -71,12 +71,35 @@ export class VisionStrategy extends BaseStrategy {
 
     const pageUrl = context.page.url();
 
+    // Build enriched request with disambiguation context from prior strategies.
+    // All new fields are optional — the Python service handles their absence.
+    const a11yTree = context.a11yTree?.map((node) => ({
+      role: node.role,
+      name: node.name,
+      description: node.description,
+      bounding_box: node.boundingBox,
+    }));
+
+    const failedAttempts = context.failedAttempts?.map((fa) => ({
+      strategy: fa.strategy,
+      error: fa.error,
+      candidates_considered: fa.candidatesConsidered,
+      best_candidate_name: fa.bestCandidateName,
+      best_candidate_score: fa.bestCandidateScore,
+    }));
+
+    const viewport = context.page.viewportSize() ?? undefined;
+
     let serviceResponse;
     try {
       serviceResponse = await this.visionClient.locate({
         screenshot_base64: context.screenshotBase64,
         description,
         page_url: pageUrl,
+        a11y_tree: a11yTree,
+        failed_attempts: failedAttempts,
+        viewport: viewport ? { width: viewport.width, height: viewport.height } : undefined,
+        target_role_hint: target.ariaRole,
       });
     } catch (error) {
       if (error instanceof VisionServiceError) {

@@ -4,15 +4,21 @@ import type { LocatorContext, LocatorTarget } from "../../src/types/strategy.typ
 import type { ElementHandle, Locator, Page } from "playwright";
 
 // ---------------------------------------------------------------------------
-// Purpose: Black-box tests for A11yStrategy
+// Purpose: Black-box tests for A11yStrategy (DOM-based implementation)
 //
 // A11yStrategy finds elements by:
-//   1. Calling page.accessibility.snapshot() to get the semantic tree
-//   2. BFS traversal + Jaro-Winkler fuzzy match against target.description
-//   3. Mapping the winning node back to DOM via page.locator(role + name)
+//   1. Calling page.locator(CANDIDATE_SELECTOR) to collect interactive elements
+//   2. For each element, extracting the accessible name via el.evaluate()
+//      (aria-label → innerText → placeholder → title)
+//   3. Scoring each candidate against target.description using Jaro-Winkler
+//   4. Picking the highest-scoring candidate above the 0.80 threshold
+//   5. Calling locator.nth(bestIndex).elementHandle() to resolve the handle
 //
-// These tests mock page.accessibility.snapshot() and page.locator() so no
-// real browser is needed. Each test exercises a distinct code path.
+// NOTE: page.accessibility was completely removed in Playwright v1.43+.
+// This strategy uses DOM queries instead — no accessibility snapshot API needed.
+//
+// These tests mock page.locator() so no real browser is needed.
+// Each test exercises a distinct code path.
 // ---------------------------------------------------------------------------
 
 function makeMockElementHandle(): ElementHandle {
@@ -23,32 +29,48 @@ function makeMockElementHandle(): ElementHandle {
   } as unknown as ElementHandle;
 }
 
-function makeMockLocator(count: number, handle: ElementHandle | null = makeMockElementHandle()): Locator {
-  const locator = {
-    count: vi.fn().mockResolvedValue(count),
+// Builds a per-element nth-locator that simulates two evaluate() calls:
+//   1st call → returns the accessible name (aria-label / innerText / placeholder / title)
+//   2nd call → returns the role (role attr or tag name)
+// This mirrors the two sequential el.evaluate() calls in A11yStrategy._locate().
+function makeNthLocator(
+  name: string,
+  role: string,
+  handle: ElementHandle | null
+): Locator {
+  let callCount = 0;
+  return {
+    evaluate: vi.fn().mockImplementation(() => {
+      callCount++;
+      return Promise.resolve(callCount === 1 ? name : role);
+    }),
     elementHandle: vi.fn().mockResolvedValue(handle),
-    first: vi.fn(),
+    boundingBox: vi.fn().mockResolvedValue({ x: 10, y: 20, width: 100, height: 40 }),
   } as unknown as Locator;
-
-  (locator.first as ReturnType<typeof vi.fn>).mockReturnValue({
-    count: vi.fn().mockResolvedValue(Math.min(count, 1)),
-    elementHandle: vi.fn().mockResolvedValue(handle),
-    first: vi.fn(),
-  });
-
-  return locator;
 }
 
-// Builds a minimal mock Page with a configurable a11y snapshot and locator.
-function makeMockPage(
-  snapshot: object | null,
-  locatorImpl: (selector: string) => Locator = () => makeMockLocator(1)
-): Page {
+// Builds a mock top-level locator returned by page.locator(CANDIDATE_SELECTOR).
+// Each entry in `candidates` becomes a separate nth-locator.
+function makeCandidateLocator(
+  candidates: Array<{ role: string; name: string; handle?: ElementHandle | null }>
+): Locator {
+  const nthLocators = candidates.map((c) =>
+    makeNthLocator(c.name, c.role, c.handle !== undefined ? c.handle : makeMockElementHandle())
+  );
+
   return {
-    accessibility: {
-      snapshot: vi.fn().mockResolvedValue(snapshot),
-    },
-    locator: vi.fn().mockImplementation(locatorImpl),
+    count: vi.fn().mockResolvedValue(candidates.length),
+    nth: vi.fn().mockImplementation((i: number) => nthLocators[i]),
+  } as unknown as Locator;
+}
+
+// Builds a minimal mock Page whose locator() returns the provided candidate set.
+function makeMockPage(
+  candidates: Array<{ role: string; name: string; handle?: ElementHandle | null }>
+): Page {
+  const locator = makeCandidateLocator(candidates);
+  return {
+    locator: vi.fn().mockReturnValue(locator),
   } as unknown as Page;
 }
 
@@ -72,28 +94,23 @@ describe("A11yStrategy", () => {
   });
 
   it("returns null when target has no description, ariaLabel, or text", async () => {
-    const page = makeMockPage({ role: "RootWebArea", children: [] });
+    const page = makeMockPage([{ role: "button", name: "Submit" }]);
     const target: LocatorTarget = { testId: "btn" }; // no text query
     const result = await strategy.locate(target, makeContext(page));
     expect(result).toBeNull();
   });
 
-  it("returns null when page.accessibility.snapshot() returns null (page still loading)", async () => {
-    const page = makeMockPage(null);
+  it("returns null when page returns zero interactive candidates", async () => {
+    // Simulates a page that has no interactive / labelled elements at all
+    const page = makeMockPage([]); // count() = 0
     const target: LocatorTarget = { description: "submit button" };
     const result = await strategy.locate(target, makeContext(page));
     expect(result).toBeNull();
   });
 
-  it("finds an element when the a11y name is an exact match", async () => {
+  it("finds an element when the accessible name is an exact match", async () => {
     const handle = makeMockElementHandle();
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Submit" },
-      ],
-    };
-    const page = makeMockPage(snapshot, () => makeMockLocator(1, handle));
+    const page = makeMockPage([{ role: "button", name: "Submit", handle }]);
 
     const target: LocatorTarget = { description: "Submit" };
     const result = await strategy.locate(target, makeContext(page));
@@ -106,13 +123,7 @@ describe("A11yStrategy", () => {
 
   it("finds an element via fuzzy match (partial label overlap)", async () => {
     const handle = makeMockElementHandle();
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Search products" },
-      ],
-    };
-    const page = makeMockPage(snapshot, () => makeMockLocator(1, handle));
+    const page = makeMockPage([{ role: "button", name: "Search products", handle }]);
 
     // "search" should fuzzy-match "Search products" above 0.80
     const target: LocatorTarget = { description: "search" };
@@ -124,13 +135,7 @@ describe("A11yStrategy", () => {
   });
 
   it("returns null when best fuzzy score is below the 0.80 threshold", async () => {
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Completely unrelated text xyz" },
-      ],
-    };
-    const page = makeMockPage(snapshot);
+    const page = makeMockPage([{ role: "button", name: "Completely unrelated text xyz" }]);
 
     const target: LocatorTarget = { description: "login" };
     const result = await strategy.locate(target, makeContext(page));
@@ -138,39 +143,26 @@ describe("A11yStrategy", () => {
     expect(result).toBeNull();
   });
 
-  it("picks the highest-scoring node when multiple nodes exist", async () => {
+  it("picks the highest-scoring node when multiple candidates exist", async () => {
     const handle = makeMockElementHandle();
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "link", name: "Contact us" },
-        { role: "button", name: "Submit form" }, // closer match to "submit"
-        { role: "button", name: "Submit" },       // exact match — should win
-      ],
-    };
-
-    // Locator returns our handle for the "Submit" selector
-    const page = makeMockPage(snapshot, (sel: string) => {
-      if (sel.includes("Submit")) return makeMockLocator(1, handle);
-      return makeMockLocator(1);
-    });
+    const page = makeMockPage([
+      { role: "link", name: "Contact us" },
+      { role: "button", name: "Submit form" }, // closer than "Contact us" but not exact
+      { role: "button", name: "Submit", handle }, // exact match — should win
+    ]);
 
     const target: LocatorTarget = { description: "Submit" };
     const result = await strategy.locate(target, makeContext(page));
 
     expect(result).not.toBeNull();
-    expect(result!.confidence).toBe(1.0); // exact match
+    expect(result!.confidence).toBe(1.0); // exact match wins
+    expect(result!.handle).toBe(handle);
   });
 
-  it("returns null when the winning a11y node cannot be found in DOM (custom ARIA)", async () => {
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Confirm" },
-      ],
-    };
-    // Locator returns 0 elements — node is in the a11y tree but Playwright can't find it
-    const page = makeMockPage(snapshot, () => makeMockLocator(0));
+  it("returns null when the winning candidate's elementHandle() returns null", async () => {
+    const page = makeMockPage([
+      { role: "button", name: "Confirm", handle: null },
+    ]);
 
     const target: LocatorTarget = { description: "Confirm" };
     const result = await strategy.locate(target, makeContext(page));
@@ -178,33 +170,24 @@ describe("A11yStrategy", () => {
     expect(result).toBeNull();
   });
 
-  it("uses first() when multiple DOM elements match the a11y selector", async () => {
+  it("resolves the correct nth element when the best match is not the first candidate", async () => {
     const handle = makeMockElementHandle();
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Add to cart" },
-      ],
-    };
-    const locator = makeMockLocator(3, handle); // 3 matching elements
-    const page = makeMockPage(snapshot, () => locator);
+    const page = makeMockPage([
+      { role: "button", name: "Cancel" },
+      { role: "button", name: "Add to cart", handle }, // best match for "Add to cart"
+    ]);
 
     const target: LocatorTarget = { description: "Add to cart" };
     const result = await strategy.locate(target, makeContext(page));
 
-    expect(locator.first).toHaveBeenCalled();
+    // Should resolve to index 1 (the exact match), not index 0
     expect(result).not.toBeNull();
+    expect(result!.handle).toBe(handle);
+    expect(result!.confidence).toBe(1.0);
   });
 
   it("returns null when elementHandle() is null after DOM lookup", async () => {
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "button", name: "Login" },
-      ],
-    };
-    // elementHandle() returns null (element disappeared between snapshot and handle())
-    const page = makeMockPage(snapshot, () => makeMockLocator(1, null));
+    const page = makeMockPage([{ role: "button", name: "Login", handle: null }]);
 
     const target: LocatorTarget = { description: "Login" };
     const result = await strategy.locate(target, makeContext(page));
@@ -214,13 +197,7 @@ describe("A11yStrategy", () => {
 
   it("uses ariaLabel as query when description is not provided", async () => {
     const handle = makeMockElementHandle();
-    const snapshot = {
-      role: "RootWebArea",
-      children: [
-        { role: "textbox", name: "Search" },
-      ],
-    };
-    const page = makeMockPage(snapshot, () => makeMockLocator(1, handle));
+    const page = makeMockPage([{ role: "textbox", name: "Search", handle }]);
 
     const target: LocatorTarget = { ariaLabel: "Search" }; // no description
     const result = await strategy.locate(target, makeContext(page));
@@ -229,17 +206,13 @@ describe("A11yStrategy", () => {
     expect(result!.strategy).toBe("a11y");
   });
 
-  it("hydrates context.a11yTree with the snapshot", async () => {
-    const snapshot = {
-      role: "RootWebArea",
-      children: [{ role: "button", name: "Go" }],
-    };
-    const page = makeMockPage(snapshot, () => makeMockLocator(1));
+  it("hydrates context.a11yTree with the collected DOM candidates", async () => {
+    const page = makeMockPage([{ role: "button", name: "Go" }]);
     const ctx = makeContext(page);
 
     await strategy.locate({ description: "Go" }, ctx);
 
-    // The snapshot should have been stored on the context for trajectory logging
+    // The candidate list should be stored on context for trajectory logging
     expect(ctx.a11yTree).toBeDefined();
     expect(ctx.a11yTree).toHaveLength(1);
   });
@@ -249,14 +222,41 @@ describe("A11yStrategy", () => {
     (handle.boundingBox as ReturnType<typeof vi.fn>).mockResolvedValue({
       x: 50, y: 100, width: 200, height: 50,
     });
-    const snapshot = {
-      role: "RootWebArea",
-      children: [{ role: "button", name: "Close" }],
-    };
-    const page = makeMockPage(snapshot, () => makeMockLocator(1, handle));
+    const page = makeMockPage([{ role: "button", name: "Close", handle }]);
 
     const result = await strategy.locate({ description: "Close" }, makeContext(page));
 
     expect(result!.boundingBox).toEqual({ x: 50, y: 100, width: 200, height: 50 });
+  });
+
+  it("skips candidates with empty accessible names", async () => {
+    const handle = makeMockElementHandle();
+    // First candidate has no accessible name (empty string) — should be skipped.
+    // Second candidate is a real match.
+    const locator = {
+      count: vi.fn().mockResolvedValue(2),
+      nth: vi.fn().mockImplementation((i: number) => {
+        if (i === 0) {
+          let calls = 0;
+          return {
+            evaluate: vi.fn().mockImplementation(() => {
+              calls++;
+              return Promise.resolve(calls === 1 ? "" : "div"); // empty name
+            }),
+            elementHandle: vi.fn().mockResolvedValue(null),
+          };
+        }
+        return makeNthLocator("Save", "button", handle);
+      }),
+    } as unknown as Locator;
+
+    const page = {
+      locator: vi.fn().mockReturnValue(locator),
+    } as unknown as Page;
+
+    const result = await strategy.locate({ description: "Save" }, makeContext(page));
+
+    expect(result).not.toBeNull();
+    expect(result!.handle).toBe(handle);
   });
 });
