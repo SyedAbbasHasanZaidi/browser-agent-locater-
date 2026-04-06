@@ -51,6 +51,12 @@ class FailedStrategyAttempt(BaseModel):
     best_candidate_score: float | None = Field(
         default=None, description="Jaro-Winkler score of the closest match"
     )
+    best_candidate_role: str | None = Field(
+        default=None, description="ARIA role of the closest match (e.g. 'button', 'link')"
+    )
+    selectors_tried: list[str] | None = Field(
+        default=None, description="CSS selectors / locator strings DOM strategy tried"
+    )
 
 
 # ---------------------------------------------------------------------------

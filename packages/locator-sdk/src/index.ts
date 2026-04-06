@@ -11,13 +11,19 @@
 
 // Primary class — the only thing most callers ever need
 export { ElementLocator } from "./locator.js";
-export type { ElementLocatorOptions, StrategyName } from "./locator.js";
+export type { ElementLocatorOptions } from "./locator.js";
 
 // Domain types — needed by callers to type their own variables
 export type {
   LocatorTarget,
-  LocatedElement,
+  LocateResult,
   LocatorContext,
+} from "./types/strategy.types.js";
+
+// Internal types — exported for advanced users building custom chains/tests.
+// Not part of the primary public API surface.
+export type {
+  LocatedElement,
   BoundingBox,
   A11yNode,
   FailedAttemptInfo,

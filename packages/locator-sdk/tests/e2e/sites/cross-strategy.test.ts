@@ -13,8 +13,9 @@
  * This catches regressions where a strategy rewrite (e.g. A11y moving from
  * page.accessibility.snapshot() to DOM queries) silently loses coverage.
  *
- * Strategy isolation is achieved via ElementLocator.create({ strategies: [...] })
- * which limits the fallback chain to only the specified strategies.
+ * Strategy isolation is achieved by constructing a FallbackChain with only
+ * the strategy under test — an internal testing technique that does not
+ * require any public API surface for strategy selection.
  *
  * +---------------------------------------------------------------+
  * |                   Cross-Strategy Test Matrix                   |
@@ -34,7 +35,14 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import path from "path";
 import { fileURLToPath } from "url";
-import { ElementLocator, type StrategyName } from "../../../src/index.js";
+import {
+  DomStrategy,
+  A11yStrategy,
+  VisionStrategy,
+  FallbackChain,
+  VisionClient,
+} from "../../../src/index.js";
+import type { LocatorContext, LocatorTarget } from "../../../src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VISION_AVAILABLE = !!process.env["VISION_SERVICE_URL"];
@@ -42,29 +50,17 @@ const VISION_AVAILABLE = !!process.env["VISION_SERVICE_URL"];
 // ---------------------------------------------------------------------------
 // Test element definitions
 // ---------------------------------------------------------------------------
-// Each entry describes one element and the targets that should find it
-// at each strategy tier. If a tier is undefined, it means that strategy
-// is not expected to find this element (e.g. DOM can't find date pickers
-// with generated IDs).
-// ---------------------------------------------------------------------------
 
 interface CrossStrategyElement {
-  /** Human-readable name for test output */
   name: string;
-  /** Page file to open */
   pageFile: string;
-  /** Target for DOM strategy (structural selector) */
   dom?: { cssSelector?: string; testId?: string; ariaLabel?: string };
-  /** Target for A11y strategy (description-based fuzzy match) */
   a11y?: { description: string };
-  /** Target for Vision strategy (natural-language description) */
   vision?: { description: string };
-  /** Minimum confidence expected from A11y match */
   minA11yConfidence?: number;
 }
 
 const ELEMENTS: CrossStrategyElement[] = [
-  // --- Wikipedia ---
   {
     name: "Wikipedia: search input",
     pageFile: "wikipedia.html",
@@ -85,8 +81,6 @@ const ELEMENTS: CrossStrategyElement[] = [
     dom: { ariaLabel: "Search" },
     a11y: { description: "Search" },
   },
-
-  // --- Airbnb ---
   {
     name: "Airbnb: reserve button",
     pageFile: "airbnb.html",
@@ -103,7 +97,6 @@ const ELEMENTS: CrossStrategyElement[] = [
   {
     name: "Airbnb: check-in input (A11y-only — no stable DOM selector)",
     pageFile: "airbnb.html",
-    // No DOM target — generated IDs, CSS-in-JS class names
     a11y: { description: "Check-in date" },
   },
   {
@@ -114,30 +107,26 @@ const ELEMENTS: CrossStrategyElement[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — construct isolated chains directly (no public API needed)
 // ---------------------------------------------------------------------------
 
-function makeLocator(page: Page, strategies: StrategyName[]) {
-  return ElementLocator.create({
-    page,
-    sessionId: `cross-strategy-${strategies.join("-")}`,
-    timeout: 5000,
-    logTrajectories: false,
-    strategies,
-    visionServiceUrl: process.env["VISION_SERVICE_URL"],
-    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
-  });
+function makeContext(page: Page, timeout = 5000): LocatorContext {
+  return { page, timeout };
 }
 
-// Group elements by page file so we open each page once.
-function groupByPage(elements: CrossStrategyElement[]): Map<string, CrossStrategyElement[]> {
-  const map = new Map<string, CrossStrategyElement[]>();
-  for (const el of elements) {
-    const list = map.get(el.pageFile) ?? [];
-    list.push(el);
-    map.set(el.pageFile, list);
-  }
-  return map;
+function domChain() {
+  return new FallbackChain([new DomStrategy()]);
+}
+
+function a11yChain() {
+  return new FallbackChain([new A11yStrategy()]);
+}
+
+function visionChain() {
+  const url = process.env["VISION_SERVICE_URL"] ?? "https://locator-sdk-production.up.railway.app";
+  const key = process.env["ANTHROPIC_API_KEY"];
+  const client = new VisionClient(url, key);
+  return new FallbackChain([new VisionStrategy(client)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +140,6 @@ describe("Cross-Strategy Backward Compatibility", () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
 
-    // Open each unique page file once and store the Page handle.
     const pageFiles = new Set(ELEMENTS.map((e) => e.pageFile));
     for (const file of pageFiles) {
       const page = await browser.newPage();
@@ -175,17 +163,13 @@ describe("Cross-Strategy Backward Compatibility", () => {
       it(`${el.name}`, async () => {
         const page = pages.get(el.pageFile)!;
 
-        // Step 1: DOM must succeed (sanity check — the element exists)
-        const domLocator = makeLocator(page, ["dom"]);
-        const domResult = await domLocator.locate(el.dom!);
-        expect(domResult.strategy).toBe("dom");
-        expect(domResult.confidence).toBe(1.0);
+        const domResult = await domChain().locate(el.dom!, makeContext(page));
+        expect(domResult.element.strategy).toBe("dom");
+        expect(domResult.element.confidence).toBe(1.0);
 
-        // Step 2: A11y (isolated, no DOM fallback) must also find it
-        const a11yLocator = makeLocator(page, ["a11y"]);
-        const a11yResult = await a11yLocator.locate(el.a11y!);
-        expect(a11yResult.strategy).toBe("a11y");
-        expect(a11yResult.confidence).toBeGreaterThanOrEqual(
+        const a11yResult = await a11yChain().locate(el.a11y!, makeContext(page));
+        expect(a11yResult.element.strategy).toBe("a11y");
+        expect(a11yResult.element.confidence).toBeGreaterThanOrEqual(
           el.minA11yConfidence ?? 0.80
         );
       });
@@ -194,7 +178,6 @@ describe("Cross-Strategy Backward Compatibility", () => {
 
   // -------------------------------------------------------------------------
   // Elements that only A11y can find (no DOM selector available).
-  // Verify A11y works in isolation.
   // -------------------------------------------------------------------------
   describe("A11y-only elements (no DOM selector)", () => {
     const a11yOnly = ELEMENTS.filter((e) => !e.dom && e.a11y);
@@ -202,11 +185,10 @@ describe("Cross-Strategy Backward Compatibility", () => {
     for (const el of a11yOnly) {
       it(`${el.name}`, async () => {
         const page = pages.get(el.pageFile)!;
-        const a11yLocator = makeLocator(page, ["a11y"]);
-        const result = await a11yLocator.locate(el.a11y!);
+        const result = await a11yChain().locate(el.a11y!, makeContext(page));
 
-        expect(result.strategy).toBe("a11y");
-        expect(result.confidence).toBeGreaterThanOrEqual(
+        expect(result.element.strategy).toBe("a11y");
+        expect(result.element.confidence).toBeGreaterThanOrEqual(
           el.minA11yConfidence ?? 0.80
         );
       });
@@ -215,7 +197,6 @@ describe("Cross-Strategy Backward Compatibility", () => {
 
   // -------------------------------------------------------------------------
   // Vision must find everything A11y finds (when Vision service is available).
-  // Skipped when VISION_SERVICE_URL is not set.
   // -------------------------------------------------------------------------
   describe.skipIf(!VISION_AVAILABLE)(
     "Vision finds everything A11y finds",
@@ -226,24 +207,15 @@ describe("Cross-Strategy Backward Compatibility", () => {
         it(`${el.name}`, async () => {
           const page = pages.get(el.pageFile)!;
 
-          // A11y must succeed first (sanity check)
-          const a11yLocator = makeLocator(page, ["a11y"]);
-          const a11yResult = await a11yLocator.locate(el.a11y!);
-          expect(a11yResult.strategy).toBe("a11y");
+          const a11yResult = await a11yChain().locate(el.a11y!, makeContext(page));
+          expect(a11yResult.element.strategy).toBe("a11y");
 
-          // Vision (isolated) must also find it
-          const visionLocator = ElementLocator.create({
-            page,
-            sessionId: "cross-strategy-vision",
-            timeout: 12000,
-            logTrajectories: false,
-            strategies: ["vision"],
-            visionServiceUrl: process.env["VISION_SERVICE_URL"],
-            anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
-          });
-          const visionResult = await visionLocator.locate(el.vision!);
-          expect(visionResult.strategy).toBe("vision");
-          expect(visionResult.confidence).toBeGreaterThanOrEqual(0.70);
+          const visionResult = await visionChain().locate(
+            el.vision!,
+            makeContext(page, 12000)
+          );
+          expect(visionResult.element.strategy).toBe("vision");
+          expect(visionResult.element.confidence).toBeGreaterThanOrEqual(0.70);
         });
       }
     }
@@ -251,23 +223,20 @@ describe("Cross-Strategy Backward Compatibility", () => {
 
   // -------------------------------------------------------------------------
   // Confidence monotonicity: DOM should have highest confidence (1.0),
-  // followed by A11y (≥0.80). Verify the ranking holds.
+  // followed by A11y (>=0.80).
   // -------------------------------------------------------------------------
-  describe("Confidence ranking: DOM ≥ A11y", () => {
+  describe("Confidence ranking: DOM >= A11y", () => {
     const elementsWithBoth = ELEMENTS.filter((e) => e.dom && e.a11y);
 
     for (const el of elementsWithBoth) {
       it(`${el.name}`, async () => {
         const page = pages.get(el.pageFile)!;
 
-        const domLocator = makeLocator(page, ["dom"]);
-        const domResult = await domLocator.locate(el.dom!);
+        const domResult = await domChain().locate(el.dom!, makeContext(page));
+        const a11yResult = await a11yChain().locate(el.a11y!, makeContext(page));
 
-        const a11yLocator = makeLocator(page, ["a11y"]);
-        const a11yResult = await a11yLocator.locate(el.a11y!);
-
-        expect(domResult.confidence).toBeGreaterThanOrEqual(
-          a11yResult.confidence
+        expect(domResult.element.confidence).toBeGreaterThanOrEqual(
+          a11yResult.element.confidence
         );
       });
     }

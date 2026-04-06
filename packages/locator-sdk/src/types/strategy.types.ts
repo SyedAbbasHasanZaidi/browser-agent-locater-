@@ -44,23 +44,32 @@ export interface BoundingBox {
 }
 
 // ---------------------------------------------------------------------------
-// LocatedElement
+// LocateResult — Public return type from ElementLocator.locate()
 // ---------------------------------------------------------------------------
-// The result returned when an element IS found. Contains:
-//   - `handle`     : the live Playwright ElementHandle for direct interaction
-//   - `strategy`   : which strategy succeeded (for logging + debugging)
-//   - `confidence` : 0–1 certainty score. DOM matches are always 1.0.
-//                    A11y matches reflect the Jaro-Winkler score (≥0.80).
-//                    Vision matches come from Claude's confidence in its bbox.
-//   - `selector`   : the resolved selector string — can be stored and replayed
-//                    on the next run to skip the fallback chain entirely.
-//   - `boundingBox`: present when the Vision strategy resolves the element, or
-//                    when Playwright can measure the element's position.
+// What consumers see. Contains only what they need to interact with the
+// element and understand how it was found:
+//   - `handle`     : live Playwright ElementHandle for click/fill/etc.
+//   - `strategy`   : which strategy succeeded (diagnostics + trajectory)
+//   - `confidence` : 0–1 certainty score (DOM=1.0, A11y≥0.80, Vision≥0.70)
 // ---------------------------------------------------------------------------
-export interface LocatedElement {
+export interface LocateResult {
   handle: ElementHandle;
   strategy: "dom" | "a11y" | "vision";
   confidence: number;
+}
+
+// ---------------------------------------------------------------------------
+// LocatedElement — Internal type used by strategies, chain, and logger
+// ---------------------------------------------------------------------------
+// Extends LocateResult with metadata needed for trajectory logging and
+// debugging. NOT exposed to consumers — they see LocateResult instead.
+//   - `selector`   : human-readable string describing how the element was
+//                    found. Only DOM selectors are replayable; A11y and Vision
+//                    selectors are for logging only.
+//   - `boundingBox`: pixel position, used by trajectory logger and Vision
+//                    post-processing to cross-reference with a11y nodes.
+// ---------------------------------------------------------------------------
+export interface LocatedElement extends LocateResult {
   selector: string;
   boundingBox?: BoundingBox;
 }
@@ -122,6 +131,10 @@ export interface FailedAttemptInfo {
   candidatesConsidered?: number;
   bestCandidateName?: string;
   bestCandidateScore?: number;
+  /** Role of the best near-miss candidate (e.g. "button", "link") — inferred by A11y */
+  bestCandidateRole?: string;
+  /** CSS selectors / locator strings that DOM strategy tried and got 0 matches */
+  selectorsTried?: string[];
 }
 
 // ---------------------------------------------------------------------------

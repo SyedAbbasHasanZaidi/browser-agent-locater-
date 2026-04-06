@@ -120,7 +120,16 @@ export class DomStrategy extends BaseStrategy {
       }
     }
 
-    // All techniques exhausted — signal to FallbackChain to try A11y next
+    // All techniques exhausted — report what was tried so Vision gets context.
+    if (candidates.length > 0) {
+      context.failedAttempts ??= [];
+      context.failedAttempts.push({
+        strategy: "dom",
+        candidatesConsidered: candidates.length,
+        selectorsTried: candidates.map((c) => c.selector),
+      });
+    }
+
     return null;
   }
 }

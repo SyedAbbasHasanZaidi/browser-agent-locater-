@@ -86,9 +86,25 @@ export class VisionStrategy extends BaseStrategy {
       candidates_considered: fa.candidatesConsidered,
       best_candidate_name: fa.bestCandidateName,
       best_candidate_score: fa.bestCandidateScore,
+      best_candidate_role: fa.bestCandidateRole,
+      selectors_tried: fa.selectorsTried,
     }));
 
     const viewport = context.page.viewportSize() ?? undefined;
+
+    // Infer role hint: prefer explicit target.ariaRole, fall back to A11y's
+    // best near-miss role. This gives Claude a type hint even when the caller
+    // didn't specify ariaRole — A11y already identified what kind of element
+    // is the closest match.
+    let roleHint = target.ariaRole;
+    if (!roleHint && context.failedAttempts) {
+      const a11yAttempt = context.failedAttempts.find(
+        (fa) => fa.strategy === "a11y" && fa.bestCandidateRole
+      );
+      if (a11yAttempt) {
+        roleHint = a11yAttempt.bestCandidateRole;
+      }
+    }
 
     let serviceResponse;
     try {
@@ -99,13 +115,10 @@ export class VisionStrategy extends BaseStrategy {
         a11y_tree: a11yTree,
         failed_attempts: failedAttempts,
         viewport: viewport ? { width: viewport.width, height: viewport.height } : undefined,
-        target_role_hint: target.ariaRole,
+        target_role_hint: roleHint,
       });
     } catch (error) {
       if (error instanceof VisionServiceError) {
-        // Service is unreachable or returned an error — treat as not found
-        // (the chain will throw ElementNotFoundError after all strategies fail).
-        // We re-throw so BaseStrategy can log it, but it won't block the chain.
         throw error;
       }
       throw error;

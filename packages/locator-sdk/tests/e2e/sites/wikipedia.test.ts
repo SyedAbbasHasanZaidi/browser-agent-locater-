@@ -37,8 +37,7 @@ function makeLocator() {
     sessionId: "test-wikipedia-session",
     timeout: 5000,
     logTrajectories: false,
-    visionServiceUrl: process.env["VISION_SERVICE_URL"],
-    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
+    // visionServiceUrl and anthropicApiKey read from env vars automatically
   });
 }
 

@@ -216,11 +216,11 @@ describe("ElementLocator", () => {
     vi.unstubAllEnvs();
   });
 
-  it("falls back to localhost:8765 when neither option nor env var is set", () => {
+  it("falls back to hosted Railway URL when neither option nor env var is set", () => {
     vi.unstubAllEnvs(); // ensure VISION_SERVICE_URL is not set
 
     const page = makeMockPage();
-    // Should not throw — default URL is used
+    // Should not throw — default hosted URL is used
     const locator = ElementLocator.create({ page, sessionId: "test-default" });
     expect(locator).toBeInstanceOf(ElementLocator);
   });

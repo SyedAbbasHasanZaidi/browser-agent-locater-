@@ -39,6 +39,8 @@ export interface VisionFailedAttempt {
   candidates_considered?: number;
   best_candidate_name?: string;
   best_candidate_score?: number;
+  best_candidate_role?: string;
+  selectors_tried?: string[];
 }
 
 export interface VisionLocateRequest {

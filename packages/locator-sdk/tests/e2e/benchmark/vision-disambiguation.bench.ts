@@ -26,7 +26,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import path from "path";
 import { fileURLToPath } from "url";
-import { ElementLocator } from "../../../src/index.js";
+import {
+  FallbackChain,
+  VisionStrategy,
+  VisionClient,
+} from "../../../src/index.js";
+import type { LocatorContext } from "../../../src/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VISION_AVAILABLE = !!process.env["VISION_SERVICE_URL"];
@@ -169,15 +174,12 @@ describe.skipIf(!VISION_AVAILABLE)("Vision Disambiguation Benchmark", () => {
       const page = pages.get(benchCase.pageFile)!;
       const start = performance.now();
 
-      const locator = ElementLocator.create({
-        page,
-        sessionId: `bench-${benchCase.category}`,
-        timeout: 15000,
-        logTrajectories: false,
-        strategies: ["vision"], // Vision only — no DOM/A11y fallback
-        visionServiceUrl: process.env["VISION_SERVICE_URL"],
-        anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
-      });
+      // Construct Vision-only chain directly (no public API for strategy isolation)
+      const url = process.env["VISION_SERVICE_URL"] ?? "https://locator-sdk-production.up.railway.app";
+      const key = process.env["ANTHROPIC_API_KEY"];
+      const client = new VisionClient(url, key);
+      const chain = new FallbackChain([new VisionStrategy(client)]);
+      const context: LocatorContext = { page, timeout: 15000 };
 
       let correct = false;
       let confidence = 0;
@@ -185,9 +187,10 @@ describe.skipIf(!VISION_AVAILABLE)("Vision Disambiguation Benchmark", () => {
       let error: string | undefined;
 
       try {
-        const result = await locator.locate({
-          description: benchCase.description,
-        });
+        const { element: result } = await chain.locate(
+          { description: benchCase.description },
+          context
+        );
 
         confidence = result.confidence;
         resolvedSelector = result.selector;

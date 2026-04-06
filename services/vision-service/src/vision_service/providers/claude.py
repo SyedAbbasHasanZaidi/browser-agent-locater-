@@ -82,7 +82,36 @@ CONFIDENCE CALIBRATION:
 """
 
 # Maximum number of a11y nodes to include in the prompt to limit token usage.
-_MAX_A11Y_NODES = 50
+_MAX_A11Y_NODES = 30
+
+# ---------------------------------------------------------------------------
+# Category-specific disambiguation guidance
+# ---------------------------------------------------------------------------
+# Instead of dumping all disambiguation rules into every prompt, we classify
+# the scenario and inject only the relevant guidance. This focuses Claude's
+# attention on the specific challenge rather than diluting it with irrelevant
+# rules about problems that don't apply.
+# ---------------------------------------------------------------------------
+
+_GUIDANCE_STALE_SELECTOR = """
+DISAMBIGUATION CONTEXT — Stale Selector:
+A CSS selector was tried and returned zero matches. The page may have been restructured since the selector was written. Focus on finding the element by its visual appearance and surrounding context rather than any structural assumptions. The selectors that failed are listed in the previous strategies section — use them to understand what element was expected.
+""".strip()
+
+_GUIDANCE_TERSE_LABEL = """
+DISAMBIGUATION CONTEXT — Short/Terse Label:
+The accessibility strategy found a near-miss but the label was too short to match confidently. The target element likely has a very brief label (1-2 words). Look for exact text matches on the page. Small text links and single-word buttons are common — scan navigation bars, footers, and sidebars carefully.
+""".strip()
+
+_GUIDANCE_DUPLICATE = """
+DISAMBIGUATION CONTEXT — Duplicate Elements:
+Multiple visually similar elements exist on this page (e.g., several buttons with the same icon or text). Use SPATIAL CONTEXT to disambiguate: identify what text label, heading, or section is NEAR the target element. The description likely mentions a container or context (e.g., "in the Adults row", "in the header") — locate that region FIRST, then find the target element WITHIN it.
+""".strip()
+
+_GUIDANCE_UNLABELED = """
+DISAMBIGUATION CONTEXT — Unlabeled Control:
+No interactive element on this page has an accessible name that matches the description. The target is likely a form control without a visible label (e.g., a dropdown, toggle, or icon-only button). Look for nearby text labels — typically above or to the left of the control. Also check for placeholder text inside inputs.
+""".strip()
 
 
 class ClaudeProvider(AbstractVisionProvider):
@@ -169,8 +198,23 @@ class ClaudeProvider(AbstractVisionProvider):
         if request.target_role_hint:
             parts.append(f"Expected element type: {request.target_role_hint}")
 
+        # Inject category-specific disambiguation guidance based on what
+        # prior strategies reported. This focuses Claude on the specific
+        # challenge rather than dumping all generic rules every time.
+        category = self._classify_disambiguation(request)
+        guidance = {
+            "stale_selector": _GUIDANCE_STALE_SELECTOR,
+            "terse_label": _GUIDANCE_TERSE_LABEL,
+            "duplicate": _GUIDANCE_DUPLICATE,
+            "unlabeled": _GUIDANCE_UNLABELED,
+        }.get(category)
+        if guidance:
+            parts.append(f"\n{guidance}")
+
         if request.a11y_tree:
-            tree_text = self._format_a11y_tree(request.a11y_tree)
+            tree_text = self._format_a11y_tree(
+                request.a11y_tree, request.description
+            )
             parts.append(
                 f"\nAccessibility tree (interactive elements on this page):\n{tree_text}"
             )
@@ -184,10 +228,24 @@ class ClaudeProvider(AbstractVisionProvider):
         return "\n".join(parts)
 
     @staticmethod
-    def _format_a11y_tree(nodes: list) -> str:
-        """Format a11y nodes as a compact numbered list for Claude."""
+    def _format_a11y_tree(nodes: list, description: str) -> str:
+        """Format a11y nodes, prioritizing those most relevant to the description.
+
+        Sorts nodes by keyword overlap with the description so Claude sees
+        the most likely candidates first. Caps at _MAX_A11Y_NODES to limit
+        token usage.
+        """
+        desc_words = set(description.lower().split())
+
+        def relevance(node) -> int:
+            name_words = set((node.name or "").lower().split())
+            return len(desc_words & name_words)
+
+        sorted_nodes = sorted(nodes, key=relevance, reverse=True)
+        top_nodes = sorted_nodes[:_MAX_A11Y_NODES]
+
         lines: list[str] = []
-        for i, node in enumerate(nodes[:_MAX_A11Y_NODES]):
+        for i, node in enumerate(top_nodes):
             name = node.name or "(no name)"
             bbox = ""
             if node.bounding_box:
@@ -207,10 +265,16 @@ class ClaudeProvider(AbstractVisionProvider):
             if a.error:
                 detail += f"error: {a.error}"
             elif a.best_candidate_name:
+                role_info = f" (role={a.best_candidate_role})" if a.best_candidate_role else ""
                 detail += (
-                    f'best match was "{a.best_candidate_name}" '
+                    f'best match was "{a.best_candidate_name}"{role_info} '
                     f"(score={a.best_candidate_score:.2f}), "
                     f"rejected — below 0.80 threshold"
+                )
+            elif a.selectors_tried:
+                detail += (
+                    f"tried {len(a.selectors_tried)} selectors, none matched: "
+                    + ", ".join(f'"{s}"' for s in a.selectors_tried[:5])
                 )
             elif a.candidates_considered is not None:
                 detail += f"evaluated {a.candidates_considered} candidates, none matched"
@@ -218,6 +282,54 @@ class ClaudeProvider(AbstractVisionProvider):
                 detail += "no candidates found"
             lines.append(detail)
         return "\n".join(lines)
+
+    # -----------------------------------------------------------------------
+    # _classify_disambiguation — Infer why Vision was invoked
+    # -----------------------------------------------------------------------
+    # Examines failed attempt metadata to determine which disambiguation
+    # category applies. Returns one of: "stale_selector", "terse_label",
+    # "duplicate", "unlabeled", or "unknown". The category selects which
+    # guidance block is injected into Claude's prompt.
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _classify_disambiguation(request: VisionLocateRequest) -> str:
+        if not request.failed_attempts:
+            return "unknown"
+
+        dom_attempt = next(
+            (a for a in request.failed_attempts if a.strategy == "dom"), None
+        )
+        a11y_attempt = next(
+            (a for a in request.failed_attempts if a.strategy == "a11y"), None
+        )
+
+        # Stale selector: DOM tried specific selectors, all returned 0 matches
+        if dom_attempt and dom_attempt.selectors_tried:
+            return "stale_selector"
+
+        # Terse label: A11y found a near-miss but score was low
+        if (
+            a11y_attempt
+            and a11y_attempt.best_candidate_score is not None
+            and a11y_attempt.best_candidate_score < 0.60
+        ):
+            return "terse_label"
+
+        # Duplicate: A11y considered many candidates, best score is moderate
+        # (multiple similar elements competing for the match)
+        if (
+            a11y_attempt
+            and (a11y_attempt.candidates_considered or 0) > 10
+            and a11y_attempt.best_candidate_score is not None
+            and a11y_attempt.best_candidate_score >= 0.60
+        ):
+            return "duplicate"
+
+        # Unlabeled: A11y found zero candidates with accessible names
+        if a11y_attempt and (a11y_attempt.candidates_considered or 0) == 0:
+            return "unlabeled"
+
+        return "unknown"
 
     # -----------------------------------------------------------------------
     # _postprocess — Cross-reference Claude's bbox with a11y nodes

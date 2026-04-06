@@ -78,18 +78,14 @@ export class A11yStrategy extends BaseStrategy {
   ): Promise<StrategyResult> {
     const { page } = context;
 
-    // Only run if we have something to fuzzy-match against.
-    // description is the primary signal; fall back to ariaLabel or text.
-    const query = target.description ?? target.ariaLabel ?? target.text;
-    if (!query) {
-      return null;
-    }
-
-    // Collect all interactive / labelled elements from the DOM.
-    // page.locator().all() returns a Locator[] — one per matching element.
+    // Always collect the a11y tree — even if we have no query to fuzzy-match.
+    // Vision strategy needs this structural map for disambiguation, and it's
+    // especially critical when DOM failed with a stale selector (no description
+    // available to score against, but the a11y tree tells Claude what exists).
     const locator = page.locator(CANDIDATE_SELECTOR);
     const count = await locator.count();
     if (count === 0) {
+      context.a11yTree = [];
       return null;
     }
 
@@ -132,8 +128,16 @@ export class A11yStrategy extends BaseStrategy {
       }
     }
 
-    // Hydrate the shared context so FallbackChain can log it later.
+    // Hydrate the shared context — always, even if we can't score below.
+    // Vision strategy reads this for disambiguation context.
     context.a11yTree = nodes;
+
+    // Now check if we have a query to fuzzy-match. If not, we've done our job
+    // (populating the a11y tree) but can't score candidates — return null.
+    const query = target.description ?? target.ariaLabel ?? target.text;
+    if (!query) {
+      return null;
+    }
 
     // Score every candidate against the query string.
     let bestIndex = -1;
@@ -159,6 +163,7 @@ export class A11yStrategy extends BaseStrategy {
         candidatesConsidered: nodes.length,
         bestCandidateName: bestIndex >= 0 ? (nodes[bestIndex].name ?? undefined) : undefined,
         bestCandidateScore: bestScore > 0 ? bestScore : undefined,
+        bestCandidateRole: bestIndex >= 0 ? nodes[bestIndex].role : undefined,
       });
       return null;
     }

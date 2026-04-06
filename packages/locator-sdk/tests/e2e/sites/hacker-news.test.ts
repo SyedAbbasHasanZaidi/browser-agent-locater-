@@ -33,14 +33,13 @@ afterAll(async () => {
   await browser.close();
 });
 
-function makeLocator(visionServiceUrl?: string) {
+function makeLocator() {
   return ElementLocator.create({
     page,
     sessionId: "test-hn-session",
     timeout: 5000,
     logTrajectories: false,
-    visionServiceUrl: visionServiceUrl ?? process.env["VISION_SERVICE_URL"],
-    anthropicApiKey: process.env["ANTHROPIC_API_KEY"],
+    // visionServiceUrl and anthropicApiKey read from env vars automatically
   });
 }
 
@@ -103,6 +102,5 @@ describe.skipIf(!VISION_AVAILABLE)("Hacker News page — Vision Strategy", () =>
 
     expect(result.strategy).toBe("vision");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-    expect(result.boundingBox).toBeTruthy();
   });
 });

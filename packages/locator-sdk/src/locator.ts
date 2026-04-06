@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import type {
-  LocatedElement,
+  LocateResult,
   LocatorContext,
   LocatorTarget,
 } from "./types/strategy.types.js";
@@ -32,6 +32,20 @@ import { TrajectoryLogger } from "./trajectory/logger.js";
 // This hides construction complexity and prevents callers from accidentally
 // constructing a misconfigured chain (e.g. VisionStrategy with no client).
 //
+// Configuration philosophy:
+//   The SDK works out-of-the-box with minimal config. Only `page` and
+//   `sessionId` are required. Everything else has sensible defaults:
+//     - Vision service URL → hosted instance (Railway)
+//     - Anthropic API key  → reads from ANTHROPIC_API_KEY env var
+//     - Timeout            → 5000ms
+//     - Trajectory logging → enabled
+//
+//   Advanced users can override via options for self-hosted deployments
+//   or custom key management. But the default path is:
+//     1. Set ANTHROPIC_API_KEY in your environment
+//     2. Call ElementLocator.create({ page, sessionId })
+//     3. Done.
+//
 // Data Flow for a locate() call:
 //   locator.locate(target)
 //     → hydrate LocatorContext { page, timeout }
@@ -44,8 +58,9 @@ import { TrajectoryLogger } from "./trajectory/logger.js";
 //       OR throw ElementNotFoundError
 // ---------------------------------------------------------------------------
 
-/** Strategy names that can be selectively enabled */
-export type StrategyName = "dom" | "a11y" | "vision";
+// The default hosted vision service. Consumers get a working SDK without
+// configuring a URL — same pattern as Stripe defaulting to api.stripe.com.
+const DEFAULT_VISION_SERVICE_URL = "https://locator-sdk-production.up.railway.app";
 
 export interface ElementLocatorOptions {
   /** The Playwright page to operate on */
@@ -57,19 +72,33 @@ export interface ElementLocatorOptions {
   sessionId: string;
   /**
    * Per-locate timeout in milliseconds. Each strategy gets this budget.
-   * Default: 5000ms
+   * Default: 5000ms. Increase to 10000+ if Railway cold-starts cause timeouts.
    */
   timeout?: number;
   /**
-   * URL of the Python vision service.
-   * Default: process.env.VISION_SERVICE_URL or "http://localhost:8765"
+   * Override the vision service URL. Most users do NOT need to set this.
+   *
+   * Default resolution (first match wins):
+   *   1. This option (if provided)
+   *   2. process.env.VISION_SERVICE_URL
+   *   3. Hosted service at https://locator-sdk-production.up.railway.app
+   *
+   * Only set this if you self-host the vision service or need to point at
+   * a different instance (staging, local dev, etc.).
    */
   visionServiceUrl?: string;
   /**
-   * BYOK (Bring Your Own Key) — your Anthropic API key.
-   * When provided, forwarded as X-Anthropic-Key on every POST /locate request
-   * so the Python service uses your key instead of its own configured key.
-   * Required when using a shared/hosted vision service without a server-side key.
+   * Your Anthropic API key for the Vision strategy (BYOK).
+   *
+   * Default resolution (first match wins):
+   *   1. This option (if provided)
+   *   2. process.env.ANTHROPIC_API_KEY
+   *
+   * The recommended approach: set ANTHROPIC_API_KEY in your environment
+   * and don't pass this option at all. The SDK reads it automatically.
+   *
+   * Only pass this option if you need per-instance key overrides
+   * (e.g., multi-tenant setup with different keys per user).
    */
   anthropicApiKey?: string;
   /**
@@ -77,16 +106,6 @@ export interface ElementLocatorOptions {
    * Default: true
    */
   logTrajectories?: boolean;
-  /**
-   * Subset of strategies to enable, in priority order.
-   * Default: ["dom", "a11y", "vision"] (the full fallback chain).
-   *
-   * Use this to isolate a single strategy for testing or to skip expensive
-   * strategies (e.g. vision) in performance-sensitive paths.
-   *
-   * Example: strategies: ["a11y"] — only A11y runs; DOM and Vision are skipped.
-   */
-  strategies?: StrategyName[];
 }
 
 export class ElementLocator {
@@ -116,28 +135,18 @@ export class ElementLocator {
       page,
       sessionId,
       timeout = 5000,
-      visionServiceUrl = process.env["VISION_SERVICE_URL"] ?? "http://localhost:8765",
-      anthropicApiKey,
+      visionServiceUrl = process.env["VISION_SERVICE_URL"] ?? DEFAULT_VISION_SERVICE_URL,
+      anthropicApiKey = process.env["ANTHROPIC_API_KEY"],
       logTrajectories = true,
-      strategies: enabledStrategies,
     } = options;
 
     const visionClient = new VisionClient(visionServiceUrl, anthropicApiKey);
 
-    // Build the full strategy set in priority order, then filter if the caller
-    // specified a subset. This preserves the canonical DOM → A11y → Vision
-    // ordering even when only a subset is enabled.
-    const allStrategies: Array<{ name: StrategyName; instance: BaseStrategy }> = [
-      { name: "dom", instance: new DomStrategy() },
-      { name: "a11y", instance: new A11yStrategy() },
-      { name: "vision", instance: new VisionStrategy(visionClient) },
-    ];
-
-    const filtered = enabledStrategies
-      ? allStrategies.filter((s) => enabledStrategies.includes(s.name))
-      : allStrategies;
-
-    const chain = new FallbackChain(filtered.map((s) => s.instance));
+    const chain = new FallbackChain([
+      new DomStrategy(),
+      new A11yStrategy(),
+      new VisionStrategy(visionClient),
+    ]);
 
     const logger = logTrajectories
       ? new TrajectoryLogger(sessionId, visionServiceUrl)
@@ -156,7 +165,7 @@ export class ElementLocator {
   //   const el = await locator.locate({ description: "the search button" })
   //   await el.handle.click()
   // ---------------------------------------------------------------------------
-  async locate(target: LocatorTarget): Promise<LocatedElement> {
+  async locate(target: LocatorTarget): Promise<LocateResult> {
     const context: LocatorContext = {
       page: this.page,
       timeout: this.timeout,
@@ -168,6 +177,7 @@ export class ElementLocator {
     );
 
     // Fire-and-forget trajectory logging — never awaited
+    // Uses the full LocatedElement (with selector + boundingBox) internally.
     if (this.logger) {
       void this.logger.log({
         target,
@@ -179,24 +189,30 @@ export class ElementLocator {
       });
     }
 
-    return element;
+    // Return the slim public type — strip internal metadata
+    const result: LocateResult = {
+      handle: element.handle,
+      strategy: element.strategy,
+      confidence: element.confidence,
+    };
+    return result;
   }
 
   // ---------------------------------------------------------------------------
   // click() — Convenience: locate + click in one call
   // ---------------------------------------------------------------------------
-  async click(target: LocatorTarget): Promise<LocatedElement> {
-    const element = await this.locate(target);
-    await element.handle.click();
-    return element;
+  async click(target: LocatorTarget): Promise<LocateResult> {
+    const result = await this.locate(target);
+    await result.handle.click();
+    return result;
   }
 
   // ---------------------------------------------------------------------------
   // fill() — Convenience: locate + fill a text input in one call
   // ---------------------------------------------------------------------------
-  async fill(target: LocatorTarget, value: string): Promise<LocatedElement> {
-    const element = await this.locate(target);
-    await element.handle.fill(value);
-    return element;
+  async fill(target: LocatorTarget, value: string): Promise<LocateResult> {
+    const result = await this.locate(target);
+    await result.handle.fill(value);
+    return result;
   }
 }
