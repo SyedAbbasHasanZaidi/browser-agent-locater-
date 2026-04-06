@@ -144,7 +144,8 @@ export class A11yStrategy extends BaseStrategy {
     let bestScore = 0;
 
     for (let i = 0; i < nodes.length; i++) {
-      const label = nodes[i].name ?? "";
+      const node = nodes[i];
+      const label = node?.name ?? "";
       if (!label) continue;
 
       const score = jaroWinkler(query.toLowerCase(), label.toLowerCase());
@@ -156,19 +157,24 @@ export class A11yStrategy extends BaseStrategy {
 
     // Reject matches below the confidence threshold.
     // Report the near-miss so Vision strategy knows what A11y tried.
+    const nearMiss = bestIndex >= 0 ? nodes[bestIndex] : undefined;
     if (bestScore < CONFIDENCE_THRESHOLD || bestIndex === -1) {
       context.failedAttempts ??= [];
       context.failedAttempts.push({
         strategy: "a11y",
         candidatesConsidered: nodes.length,
-        bestCandidateName: bestIndex >= 0 ? (nodes[bestIndex].name ?? undefined) : undefined,
+        bestCandidateName: nearMiss?.name ?? undefined,
         bestCandidateScore: bestScore > 0 ? bestScore : undefined,
-        bestCandidateRole: bestIndex >= 0 ? nodes[bestIndex].role : undefined,
+        bestCandidateRole: nearMiss?.role,
       });
       return null;
     }
 
-    const bestLocator = locator.nth(domIndices[bestIndex]);
+    const domIndex = domIndices[bestIndex];
+    if (domIndex === undefined) {
+      return null;
+    }
+    const bestLocator = locator.nth(domIndex);
     const handle = await bestLocator.elementHandle();
     if (handle === null) {
       return null;
@@ -177,7 +183,7 @@ export class A11yStrategy extends BaseStrategy {
     const boundingBox = (await handle.boundingBox()) ?? undefined;
 
     // Build a human-readable selector for trajectory logging.
-    const bestNode = nodes[bestIndex];
+    const bestNode = nearMiss!;
     const safeName = (bestNode.name ?? "").replace(/"/g, '\\"');
     const selector = `a11y:${bestNode.role}[name="${safeName}"]`;
 

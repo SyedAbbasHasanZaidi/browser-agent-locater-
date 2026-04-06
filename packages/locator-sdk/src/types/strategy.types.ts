@@ -71,7 +71,7 @@ export interface LocateResult {
 // ---------------------------------------------------------------------------
 export interface LocatedElement extends LocateResult {
   selector: string;
-  boundingBox?: BoundingBox;
+  boundingBox?: BoundingBox | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,14 +127,14 @@ export interface A11yNode {
 // ---------------------------------------------------------------------------
 export interface FailedAttemptInfo {
   strategy: "dom" | "a11y";
-  error?: string;
-  candidatesConsidered?: number;
-  bestCandidateName?: string;
-  bestCandidateScore?: number;
+  error?: string | undefined;
+  candidatesConsidered?: number | undefined;
+  bestCandidateName?: string | undefined;
+  bestCandidateScore?: number | undefined;
   /** Role of the best near-miss candidate (e.g. "button", "link") — inferred by A11y */
-  bestCandidateRole?: string;
+  bestCandidateRole?: string | undefined;
   /** CSS selectors / locator strings that DOM strategy tried and got 0 matches */
-  selectorsTried?: string[];
+  selectorsTried?: string[] | undefined;
 }
 
 // ---------------------------------------------------------------------------

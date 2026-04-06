@@ -27,33 +27,33 @@ import type {
 // A11y node info sent as disambiguation context for the Vision provider.
 export interface VisionA11yNodeInfo {
   role: string;
-  name?: string;
-  description?: string;
-  bounding_box?: { x: number; y: number; width: number; height: number };
+  name?: string | undefined;
+  description?: string | undefined;
+  bounding_box?: { x: number; y: number; width: number; height: number } | undefined;
 }
 
 // What a previous strategy tried and why it failed.
 export interface VisionFailedAttempt {
   strategy: "dom" | "a11y";
-  error?: string;
-  candidates_considered?: number;
-  best_candidate_name?: string;
-  best_candidate_score?: number;
-  best_candidate_role?: string;
-  selectors_tried?: string[];
+  error?: string | undefined;
+  candidates_considered?: number | undefined;
+  best_candidate_name?: string | undefined;
+  best_candidate_score?: number | undefined;
+  best_candidate_role?: string | undefined;
+  selectors_tried?: string[] | undefined;
 }
 
 export interface VisionLocateRequest {
   screenshot_base64: string;
   description: string;
   page_url: string;
-  provider?: "claude" | "openai";
-  max_candidates?: number;
+  provider?: "claude" | "openai" | undefined;
+  max_candidates?: number | undefined;
   // Disambiguation context (all optional, backward compatible)
-  a11y_tree?: VisionA11yNodeInfo[];
-  failed_attempts?: VisionFailedAttempt[];
-  viewport?: { width: number; height: number };
-  target_role_hint?: string;
+  a11y_tree?: VisionA11yNodeInfo[] | undefined;
+  failed_attempts?: VisionFailedAttempt[] | undefined;
+  viewport?: { width: number; height: number } | undefined;
+  target_role_hint?: string | undefined;
 }
 
 export class VisionClient {
@@ -166,7 +166,7 @@ export class VisionClient {
 // from other errors (e.g. Playwright crash, timeout).
 // ---------------------------------------------------------------------------
 export class VisionServiceError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(message: string, public override readonly cause?: unknown) {
     super(message);
     this.name = "VisionServiceError";
   }

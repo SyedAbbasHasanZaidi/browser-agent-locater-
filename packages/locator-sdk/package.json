@@ -1,8 +1,27 @@
 {
-  "name": "locator-sdk",
+  "name": "agent-element-locator",
   "version": "0.1.0",
-  "description": "Multi-strategy browser element locator: DOM → A11y → Vision fallback chain",
+  "description": "Multi-strategy browser element locator: DOM → A11y → Vision fallback chain for AI agent automation",
   "type": "module",
+  "license": "MIT",
+  "author": "Syed Abbas Hasan Zaidi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SyedAbbasHasanZaidi/browser-agent-locater-.git",
+    "directory": "packages/locator-sdk"
+  },
+  "keywords": [
+    "browser-automation",
+    "element-locator",
+    "playwright",
+    "accessibility",
+    "vision",
+    "ai-agent",
+    "fallback-chain",
+    "dom",
+    "a11y",
+    "testing"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,18 +30,26 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "lint": "tsc --noEmit"
   },
-  "dependencies": {
-    "playwright": "^1.44.0"
-  },
   "devDependencies": {
     "@types/node": "^20.12.12",
+    "playwright": "^1.44.0",
+    "typescript": "^6.0.2",
     "vitest": "^1.6.0"
   },
   "peerDependencies": {
