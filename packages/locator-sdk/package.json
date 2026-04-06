@@ -1,6 +1,6 @@
 {
   "name": "agent-element-locator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-strategy browser element locator: DOM → A11y → Vision fallback chain for AI agent automation",
   "type": "module",
   "license": "MIT",
